@@ -214,8 +214,20 @@ class App:
     # ── Задания ───────────────────────────────────────────────────────────────
 
     def _on_process_job(self, job_id: int) -> None:
-        # Этап 5 — здесь будет запуск транскрипции и LLM
-        print(f"[app] process job {job_id} requested (Этап 5)")
+        """Запускает пайплайн транскрипции в фоновом потоке."""
+        import threading
+        from app.processing.pipeline import run_transcription
+
+        def run():
+            try:
+                path = run_transcription(job_id)
+                print(f"[app] job {job_id} done → {path}")
+            except Exception as e:
+                print(f"[app] job {job_id} error: {e}", file=sys.stderr)
+            finally:
+                self._root.after(0, self._refresh_tray_jobs)
+
+        threading.Thread(target=run, daemon=True, name=f"pipeline-{job_id}").start()
 
     def _refresh_tray_jobs(self) -> None:
         with get_conn() as conn:
