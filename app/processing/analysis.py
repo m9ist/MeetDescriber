@@ -11,6 +11,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+import config
+
 log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
@@ -75,7 +77,7 @@ def _call_claude(prompt: str) -> str:
     """Вызывает claude -p через subprocess. Использует подписку, не API-кредиты."""
     log.info("Запуск claude CLI для анализа...")
     result = subprocess.run(
-        ["claude", "-p", prompt],
+        [config.CLAUDE_CLI, "-p", prompt],
         capture_output=True,
         text=True,
         encoding="utf-8",
