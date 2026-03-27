@@ -10,6 +10,8 @@ import wave
 from dataclasses import dataclass
 from pathlib import Path
 
+import warnings
+
 import config
 
 
@@ -32,7 +34,10 @@ def _get_pipeline():
     with _pipeline_lock:
         if _pipeline is None:
             import torch
-            from pyannote.audio import Pipeline
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="torchcodec is not installed")
+                warnings.filterwarnings("ignore", category=UserWarning, module="torio")
+                from pyannote.audio import Pipeline
             _pipeline = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-3.1",
                 token=config.HUGGINGFACE_TOKEN,
