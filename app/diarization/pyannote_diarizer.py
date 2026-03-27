@@ -87,14 +87,9 @@ class PyannoteDiarizer:
         audio = {"waveform": waveform.cpu(), "sample_rate": rate}
         result = pipeline(audio)
 
-        import logging as _log
-        _log.getLogger(__name__).debug(
-            "DiarizeOutput type=%s attrs=%s", type(result).__name__, dir(result)
-        )
-
-        # pyannote 4.x возвращает DiarizeOutput(diarization=Annotation, ...)
+        # pyannote 4.x возвращает DiarizeOutput; нужный атрибут — speaker_diarization
         # более старые версии возвращают Annotation напрямую
-        annotation = getattr(result, "diarization", result)
+        annotation = getattr(result, "speaker_diarization", result)
 
         segments: list[DiarizationSegment] = []
         for turn, _, speaker in annotation.itertracks(yield_label=True):
