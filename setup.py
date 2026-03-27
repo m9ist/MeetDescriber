@@ -469,28 +469,86 @@ def check_h6_confidence() -> bool:
 def check_h7_native_messaging() -> bool:
     header("H7 — Chrome Native Messaging")
 
-    info("Проверяем наличие манифест-файла расширения и регистрацию хоста.")
-
-    ext_manifest = Path("app/extension/chrome/manifest.json")
-    native_manifest_dir_win = Path.home() / "AppData/Local/Google/Chrome/User Data/NativeMessagingHosts"
-    native_manifest_dir_mac = Path.home() / "Library/Application Support/Google/Chrome/NativeMessagingHosts"
-
-    if not ext_manifest.exists() or ext_manifest.stat().st_size < 10:
-        info("Манифест расширения не заполнен — расширение ещё не создано.")
-        info("H7 будет проверена в Этапе 2 (браузерное расширение).")
-        record_result("H7", None)
-        return True
-
-    native_dir = native_manifest_dir_win if IS_WINDOWS else native_manifest_dir_mac
-    if not native_dir.exists():
-        fail(f"Директория Native Messaging не найдена: {native_dir}")
-        info("Chrome должен быть установлен и запущен хотя бы раз")
+    # Шаг 1: регистрируем хост
+    info("Регистрируем Native Messaging хост...")
+    try:
+        from app.extension.install_host import install, get_extension_id
+        ext_id = get_extension_id()
+        ok_install = install(extension_id=ext_id)
+        if ok_install:
+            ok("Хост зарегистрирован в реестре")
+        else:
+            fail("Не удалось зарегистрировать хост")
+            record_result("H7", False)
+            return False
+    except Exception as e:
+        fail(f"Ошибка регистрации: {e}")
         record_result("H7", False)
         return False
 
-    ok(f"Директория Native Messaging существует: {native_dir}")
-    info("Полная проверка H7 — в Этапе 2")
-    record_result("H7", None)
+    # Шаг 2: ping-pong тест — запускаем хост как subprocess
+    info("Тест ping-pong с Native Messaging хостом...")
+    try:
+        import json, struct, subprocess as sp
+        host_script = Path("app/extension/native_host.py")
+        proc = sp.Popen(
+            [sys.executable, str(host_script)],
+            stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE,
+        )
+        # Отправляем ping
+        msg = json.dumps({"type": "ping"}).encode("utf-8")
+        proc.stdin.write(struct.pack("<I", len(msg)) + msg)
+        proc.stdin.flush()
+        # Читаем ответ (таймаут 3 сек)
+        import select, platform as _platform
+        if _platform.system() == "Windows":
+            # select не работает с pipe на Windows — читаем напрямую
+            proc.stdin.close()
+            raw_len = proc.stdout.read(4)
+        else:
+            r, _, _ = select.select([proc.stdout], [], [], 3)
+            if not r:
+                proc.kill()
+                fail("Хост не ответил за 3 секунды")
+                record_result("H7", False)
+                return False
+            raw_len = proc.stdout.read(4)
+
+        if len(raw_len) == 4:
+            msg_len = struct.unpack("<I", raw_len)[0]
+            response = json.loads(proc.stdout.read(msg_len).decode("utf-8"))
+            proc.kill()
+            if response.get("type") == "pong":
+                ok("Ping-pong успешен — хост отвечает")
+            else:
+                fail(f"Неожиданный ответ: {response}")
+                record_result("H7", False)
+                return False
+        else:
+            proc.kill()
+            fail("Хост не вернул данные")
+            record_result("H7", False)
+            return False
+    except Exception as e:
+        fail(f"Ошибка теста: {e}")
+        record_result("H7", False)
+        return False
+
+    # Шаг 3: инструкция по установке расширения
+    ext_id = get_extension_id()
+    if not ext_id:
+        info("")
+        info("Следующий шаг — установить Chrome-расширение:")
+        info("  1. Открой chrome://extensions/")
+        info("  2. Включи 'Режим разработчика' (правый верхний угол)")
+        info(f"  3. 'Загрузить распакованное' → выбери папку:")
+        info(f"     {Path('app/extension/chrome').resolve()}")
+        info("  4. Скопируй ID расширения и выполни:")
+        info("     python -m app.extension.install_host --update-id <ID>")
+        info("")
+        info("После установки расширения хост будет принимать подключения от Chrome.")
+
+    record_result("H7", True)
     return True
 
 

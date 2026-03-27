@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "for_meets",
+  "version": "1.0",
+  "description": "Определяет Google Meet встречи и передаёт список вкладок локальному приложению",
+  "permissions": [
+    "tabs",
+    "nativeMessaging"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "for_meets"
+  }
+}
