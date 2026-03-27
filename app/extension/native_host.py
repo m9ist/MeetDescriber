@@ -55,12 +55,14 @@ class NativeHost:
 
     def run(self) -> None:
         """Основной цикл чтения сообщений."""
+        import logging
         self._running = True
         while self._running:
             msg = read_message()
             if msg is None:
                 break
             msg_type = msg.get("type")
+            logging.info(f"received: {msg_type}")
             handler = self._handlers.get(msg_type)
             if handler:
                 try:

@@ -1,25 +1,33 @@
 const HOST_NAME = "com.for_meets.host";
 
+console.log("[for_meets] service worker started");
+
 let port = null;
 let meetTabs = new Set();
 
 function connect() {
+  console.log("[for_meets] connecting to native host...");
   port = chrome.runtime.connectNative(HOST_NAME);
 
   port.onMessage.addListener((msg) => {
-    // Ответы от Python хоста — пока только логируем
-    console.log("[for_meets] host response:", msg);
+    console.log("[for_meets] host message:", msg);
   });
 
+  console.log("[for_meets] port created, waiting for messages");
+
   port.onDisconnect.addListener(() => {
-    console.log("[for_meets] native host disconnected, retry in 5s");
+    const err = chrome.runtime.lastError;
+    console.error("[for_meets] disconnect:", err ? err.message : "unknown reason");
     port = null;
     setTimeout(connect, 5000);
   });
 }
 
 function send(msg) {
-  if (!port) return;
+  if (!port) {
+    console.warn("[for_meets] send skipped — no port, msg:", msg.type);
+    return;
+  }
   try {
     port.postMessage(msg);
   } catch (e) {
@@ -38,14 +46,17 @@ function isMeetUrl(url) {
 
 // Слушаем обновления вкладок
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  console.log("[for_meets] tab updated:", tabId, changeInfo.status, tab.url);
   if (changeInfo.status !== "complete") return;
 
   const wasMeet = meetTabs.has(tabId);
   const isMeet = isMeetUrl(tab.url);
+  console.log("[for_meets] isMeet:", isMeet, "wasMeet:", wasMeet, "url:", tab.url);
 
   if (isMeet && !wasMeet) {
     meetTabs.add(tabId);
     const tabs = await getAllTabs();
+    console.log("[for_meets] meet detected, sending meet_started");
     send({ type: "meet_started", tab_id: tabId, title: tab.title || "", tabs });
   } else if (!isMeet && wasMeet) {
     meetTabs.delete(tabId);
