@@ -91,11 +91,15 @@ def _call_claude(prompt: str) -> str:
         r_echo = subprocess.run("echo ok", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
         log.info("echo test rc=%d out=%r", r_echo.returncode, r_echo.stdout[:20])
         cli_dir = os.path.dirname(cli)
-        import glob as _glob
+        import glob as _glob, shutil as _shutil
         log.info("CLAUDE_CLI env=%r", os.environ.get("CLAUDE_CLI"))
-        log.info("isfile=%s isdir=%s", os.path.isfile(cli), os.path.isdir(cli_dir))
-        _pat = str(Path.home()) + r"\AppData\Roaming\Claude\claude-code\*\claude.exe"
-        log.info("glob=%r", _glob.glob(_pat))
+        log.info("isfile=%s isdir=%s home=%r", os.path.isfile(cli), os.path.isdir(cli_dir), str(Path.home()))
+        try:
+            _cc = str(Path.home() / "AppData" / "Roaming" / "Claude" / "claude-code")
+            log.info("listdir(claude-code)=%r", os.listdir(_cc))
+        except Exception as _e:
+            log.info("listdir(claude-code) err=%r", _e)
+        log.info("which(claude)=%r", _shutil.which("claude"))
         # Тест 1: доступна ли директория claude через cmd?
         r_dir = subprocess.run(f'dir "{cli_dir}"', shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
         log.info("dir test rc=%d bytes=%d err=%r", r_dir.returncode, len(r_dir.stdout), r_dir.stderr[:60])
