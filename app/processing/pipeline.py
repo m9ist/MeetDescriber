@@ -214,6 +214,35 @@ def run_transcription(job_id: int) -> Optional[Path]:
             (str(doc_paths["transcription"]), job_id),
         )
 
+    # Этап 5а: смысловой анализ
+    from app.processing.analysis import write_analysis_md
+    write_analysis_md(
+        path=doc_paths["analysis"],
+        title=title,
+        started_at=started_at,
+        agenda=agenda,
+        transcription_path=doc_paths["transcription"],
+    )
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE jobs SET analysis_path=? WHERE id=?",
+            (str(doc_paths["analysis"]), job_id),
+        )
+
+    # Этап 5б: follow-up
+    from app.processing.followup import write_followup_md
+    write_followup_md(
+        path=doc_paths["followup"],
+        title=title,
+        started_at=started_at,
+        analysis_path=doc_paths["analysis"],
+    )
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE jobs SET followup_path=? WHERE id=?",
+            (str(doc_paths["followup"]), job_id),
+        )
+
     _set_job_status(job_id, "done")
     return doc_paths["transcription"]
 
