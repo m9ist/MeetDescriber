@@ -24,7 +24,7 @@ def get_exe_path(host_script: str) -> str:
     Chrome на Windows требует .exe — .bat не запускается через CreateProcess.
     Возвращает путь к скомпилированному for_meets_host.exe.
     """
-    exe = Path(host_script).parent / "dist" / "for_meets_host.exe"
+    exe = Path(host_script).parent / "dist" / "for_meets_host" / "for_meets_host.exe"
     if not exe.exists():
         raise FileNotFoundError(
             f"for_meets_host.exe не найден: {exe}\n"

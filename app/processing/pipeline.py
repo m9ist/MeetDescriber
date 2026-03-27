@@ -172,6 +172,8 @@ def run_transcription(job_id: int) -> Optional[Path]:
     doc_paths = file_manager.get_doc_paths(title, started_at)
 
     # ── Этап 2: транскрипция + диаризация ────────────────────────────────────
+    job = dict(job)  # sqlite3.Row → dict для .get()
+
     if job.get("transcription_path") and Path(job["transcription_path"]).exists():
         # Уже сделано — пропускаем
         pass
