@@ -77,7 +77,7 @@ for_meets/
 | H4 | mlx-whisper работает на Mac M4 Pro | ⏳ Отложена | Проверим на Mac |
 | H5 | pyannote.audio разделяет спикеров в русской речи | ✅ Технически работает | Pipeline загружается и работает на CUDA. Качество на русской речи — Этап 4. Нюанс: pyannote 4.x требует передавать аудио как тензор (torchcodec не работает на Windows без FFmpeg full-shared) |
 | H6 | Confidence score Whisper коррелирует с реальным качеством | ✅ Подтверждена | Чистый сигнал → высокий score, шум → низкий |
-| H7 | Native Messaging между Chrome и Python работает стабильно | ⏳ Этап 2 | |
+| H7 | Native Messaging между Chrome и Python работает стабильно | ✅ Подтверждена | Chrome детектит meet.google.com → расширение отправляет meet_started/meet_ended → Python-хост получает. Нюанс: .bat не работает с Chrome CreateProcess — нужен .exe (PyInstaller --onedir) |
 | H8 | Транскрипция при 2x скорости воспроизведения приемлема | ⏳ Этап 4 | Проверим на реальной записи |
 
 **Выводы по установке (Windows):**
@@ -85,6 +85,9 @@ for_meets/
 - `torch` при установке через `--user` не заменяет системную версию без `--force-reinstall`
 - pyannote 4.x зависит от трёх gated-репозиторов: `speaker-diarization-3.1`, `segmentation-3.0`, `speaker-diarization-community-1`
 - pyannote 4.x принимает аудио как `{"waveform": Tensor, "sample_rate": int}` — torchcodec не нужен
+- Chrome Native Messaging на Windows требует .exe — .bat файлы не работают через CreateProcess
+- PyInstaller `--onefile` может блокироваться Defender при распаковке во temp; `--onedir` надёжнее
+- После регистрации хоста в реестре требуется полный перезапуск Chrome
 
 ---
 
@@ -104,10 +107,10 @@ for_meets/
 - [x] Оценка качества чанка (confidence на лету через mini-whisper) `[H6]`
 - [ ] Toast при низком качестве — реализуем в Этапе 3 (нужен UI)
 
-### Этап 2 — Браузерное расширение `[H7]`
-- [ ] Chrome расширение: мониторинг вкладок, детект `meet.google.com`
-- [ ] Native Messaging хост на Python
-- [ ] Диалог выбора источника с вкладками браузера
+### Этап 2 — Браузерное расширение ✅ `[H7]`
+- [x] Chrome расширение: мониторинг вкладок, детект `meet.google.com`
+- [x] Native Messaging хост на Python (скомпилирован в .exe через PyInstaller)
+- [ ] Диалог выбора источника с вкладками браузера — реализуем в Этапе 3
 
 ### Этап 3 — Tray и UI
 - [ ] `pystray` tray-иконка
