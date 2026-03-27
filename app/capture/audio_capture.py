@@ -288,10 +288,9 @@ def _get_quality_model():
     with _quality_model_lock:
         if _quality_model is None:
             from faster_whisper import WhisperModel
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            compute = "float16" if device == "cuda" else "int8"
-            _quality_model = WhisperModel("tiny", device=device, compute_type=compute)
+            # Принудительно CPU: tiny-модель быстрая, а GPU-контекст делить с основной
+            # моделью из другого потока небезопасно — вызывает hard crash в CUDA runtime.
+            _quality_model = WhisperModel("tiny", device="cpu", compute_type="int8")
     return _quality_model
 
 
