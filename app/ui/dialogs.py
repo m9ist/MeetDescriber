@@ -107,18 +107,33 @@ class MeetingStartDialog:
 
         self._source_listbox = listbox
 
+        # Loopback устройства — первыми, со звёздочкой
+        first_loopback_idx = None
+        for i, src in enumerate(audio_sources):
+            if src.get("is_loopback"):
+                label = f"🔊 {src['name']} ✓"
+                listbox.insert("end", label)
+                self._source_map[label] = {"type": "audio", **src}
+                if first_loopback_idx is None:
+                    first_loopback_idx = listbox.size() - 1
+
+        # Остальные устройства
         for src in audio_sources:
-            label = f"🔊 {src['name']}"
-            listbox.insert("end", label)
-            self._source_map[label] = {"type": "audio", **src}
+            if not src.get("is_loopback"):
+                label = f"🎤 {src['name']}"
+                listbox.insert("end", label)
+                self._source_map[label] = {"type": "audio", **src}
 
         for tab in browser_tabs:
             label = f"🌐 {tab.get('title') or tab.get('url', 'Вкладка')}"
             listbox.insert("end", label)
             self._source_map[label] = {"type": "tab", **tab}
 
+        # Выбираем первый loopback по умолчанию
+        default = first_loopback_idx if first_loopback_idx is not None else 0
         if listbox.size() > 0:
-            listbox.select_set(0)
+            listbox.select_set(default)
+            listbox.see(default)
 
     def _on_ok(self) -> None:
         self.ok = True

@@ -148,7 +148,7 @@ class AudioCapture:
             info = pa.get_device_info_by_index(preferred_index)
             if info.get("isLoopbackDevice"):
                 return info
-            raise ValueError(f"Устройство {preferred_index} не является loopback")
+            # Не loopback — игнорируем и ищем автоматически
 
         try:
             wasapi_info = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
