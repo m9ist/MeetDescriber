@@ -83,13 +83,29 @@ def _call_claude(prompt: str) -> str:
         f.write(prompt.encode("utf-8"))
         tmp_path = f.name
     try:
-        result = subprocess.run(
-            f'type "{tmp_path}" | "{cli}" -p -',
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=300,
-        )
+        comspec = os.environ.get("COMSPEC", "")
+        log.info("COMSPEC=%r", comspec)
+        # Попытка 1: stdin pipe напрямую (без shell)
+        try:
+            with open(tmp_path, "rb") as fh:
+                r_direct = subprocess.run(
+                    [cli, "-p", "-"],
+                    stdin=fh,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=300,
+                )
+            log.info("direct rc=%d stdout=%d stderr=%r", r_direct.returncode, len(r_direct.stdout or b""), (r_direct.stderr or b"")[:100])
+            result = r_direct
+        except (FileNotFoundError, OSError) as exc:
+            log.warning("direct failed: %s — пробуем shell=True", exc)
+            result = subprocess.run(
+                f'type "{tmp_path}" | "{cli}" -p -',
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=300,
+            )
     finally:
         os.unlink(tmp_path)
     stdout_text = (result.stdout or b"").decode("utf-8", errors="replace")
