@@ -37,8 +37,9 @@ def _get_pipeline():
                 "pyannote/speaker-diarization-3.1",
                 token=config.HUGGINGFACE_TOKEN,
             )
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            _pipeline.to(device)
+            # Принудительно CPU: после загрузки whisper-large-v3 (~3GB)
+            # в VRAM места для pyannote не остаётся — hard crash в CUDA runtime.
+            _pipeline.to(torch.device("cpu"))
     return _pipeline
 
 
@@ -78,7 +79,7 @@ class PyannoteDiarizer:
         pipeline = _get_pipeline()
         waveform, rate = _load_wav_as_tensor(audio_path)
 
-        audio = {"waveform": waveform, "sample_rate": rate}
+        audio = {"waveform": waveform.cpu(), "sample_rate": rate}
         diarization = pipeline(audio)
 
         segments: list[DiarizationSegment] = []
