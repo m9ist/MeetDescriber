@@ -162,9 +162,12 @@ class ForMeetsTray:
     @staticmethod
     def _job_label(job: dict) -> str:
         title = job.get("title") or "Без названия"
-        date = (job.get("started_at") or "")[:10]
+        dt = (job.get("started_at") or "")
+        date = dt[:10]
+        time = dt[11:16]
+        label_dt = f"{date} {time}" if time else date
         suffix = " → анализ" if job.get("status") == "transcribed" else ""
-        return f"{date}  {title}{suffix}"
+        return f"{label_dt}  {title}{suffix}"
 
     def _make_job_handler(self, job_id: int) -> Callable:
         def handler(icon, item):

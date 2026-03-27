@@ -22,6 +22,8 @@ from typing import Optional
 
 import numpy as np
 
+import config
+
 log = logging.getLogger(__name__)
 
 N_BARS = 40
@@ -109,12 +111,25 @@ class SpectrumWidget:
             return
         try:
             bars = self._compute_bars()
-            for i in range(N_BARS):
-                self._smoothed[i] = max(bars[i], self._smoothed[i] * DECAY)
+            if self._compute_rms() < config.SILENCE_THRESHOLD_RMS:
+                self._smoothed = [0.0] * N_BARS
+            else:
+                for i in range(N_BARS):
+                    self._smoothed[i] = max(bars[i], self._smoothed[i] * DECAY)
             self._draw(self._smoothed)
         except Exception:
             log.error("spectrum _tick error:\n%s", traceback.format_exc())
         self._root.after(UPDATE_MS, self._tick)
+
+    def _compute_rms(self) -> float:
+        with self._lock:
+            data = bytes(self._buf[-4096:])
+        ch = self._channels
+        count = len(data) // (2 * ch)
+        if count < 16:
+            return 0.0
+        samples = np.frombuffer(data, dtype=np.int16)[::ch].astype(np.float32)
+        return float(np.sqrt(np.mean(samples ** 2)))
 
     def _compute_bars(self) -> list[float]:
         with self._lock:

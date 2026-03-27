@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import config
 from app.storage.db import get_conn
@@ -141,7 +141,10 @@ def _save_speakers(session_id: int, speaker_map: dict[str, str]) -> None:
 
 # ── Главная функция ───────────────────────────────────────────────────────────
 
-def run_transcription(job_id: int) -> Optional[Path]:
+def run_transcription(
+    job_id: int,
+    on_progress: Optional[Callable[[str, str], None]] = None,
+) -> Optional[Path]:
     """
     Запускает полный пайплайн Этапа 4 для задания job_id.
 
@@ -171,6 +174,10 @@ def run_transcription(job_id: int) -> Optional[Path]:
     session_dir = config.RECORDINGS_DIR / f"session_{session_id}"
     doc_paths = file_manager.get_doc_paths(title, started_at)
 
+    def _progress(stage: str, detail: str = "") -> None:
+        if on_progress:
+            on_progress(stage, detail)
+
     # ── Этап 2: транскрипция + диаризация ────────────────────────────────────
     job = dict(job)  # sqlite3.Row → dict для .get()
 
@@ -182,14 +189,18 @@ def run_transcription(job_id: int) -> Optional[Path]:
         merged = file_manager.merge_chunks(session_dir)
         if not merged:
             _set_job_status(job_id, "error", "Нет аудиофайлов в сессии")
+            _progress("error", "Нет аудиофайлов")
             return None
 
+        _progress("transcribing")
         backend = get_backend()
         transcription = backend.transcribe(merged)
 
+        _progress("diarizing")
         diarizer = PyannoteDiarizer()
         diarization = diarizer.diarize(merged)
 
+        _progress("aligning")
         aligned = _assign_speakers(transcription, diarization)
 
         saved_names = _load_saved_speakers(session_id)
@@ -217,6 +228,7 @@ def run_transcription(job_id: int) -> Optional[Path]:
     if job.get("analysis_path") and Path(job["analysis_path"]).exists():
         pass
     else:
+        _progress("analysis")
         from app.processing.analysis import write_analysis_md
         write_analysis_md(
             path=doc_paths["analysis"],
@@ -236,6 +248,7 @@ def run_transcription(job_id: int) -> Optional[Path]:
     if job.get("followup_path") and Path(job["followup_path"]).exists():
         pass
     else:
+        _progress("followup")
         from app.processing.followup import write_followup_md
         write_followup_md(
             path=doc_paths["followup"],
@@ -251,6 +264,7 @@ def run_transcription(job_id: int) -> Optional[Path]:
             )
 
     _set_job_status(job_id, "done")
+    _progress("done")
     return doc_paths["transcription"]
 
 

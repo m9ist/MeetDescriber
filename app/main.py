@@ -46,6 +46,7 @@ from app.capture.audio_capture import AudioCapture, list_audio_sources
 from app.extension.native_host import NativeHost, read_message, send_message
 from app.ui import notifications, tray as tray_module, dialogs
 from app.ui.spectrum import SpectrumWidget
+from app.ui.status_window import ProcessingStatusWindow
 
 
 class App:
@@ -251,13 +252,25 @@ class App:
         import threading
         from app.processing.pipeline import run_transcription
 
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT s.title FROM jobs j JOIN sessions s ON s.id=j.session_id WHERE j.id=?",
+                (job_id,),
+            ).fetchone()
+        title = row["title"] if row else "Встреча"
+
+        modal = ProcessingStatusWindow(self._root, title)
+        modal.show()
+
         def run():
             try:
-                path = run_transcription(job_id)
-                print(f"[app] job {job_id} done → {path}")
+                path = run_transcription(job_id, on_progress=modal.update)
+                log.info("job %d done → %s", job_id, path)
             except Exception as e:
                 log.error("job %d error: %s", job_id, e, exc_info=True)
+                modal.update("error", str(e)[:60])
             finally:
+                modal.close()
                 self._root.after(0, self._refresh_tray_jobs)
 
         threading.Thread(target=run, daemon=True, name=f"pipeline-{job_id}").start()
