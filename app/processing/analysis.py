@@ -91,9 +91,13 @@ def _call_claude(prompt: str) -> str:
         r_echo = subprocess.run("echo ok", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
         log.info("echo test rc=%d out=%r", r_echo.returncode, r_echo.stdout[:20])
         cli_dir = os.path.dirname(cli)
+        log.info("APPDATA=%r USERPROFILE=%r", os.environ.get("APPDATA"), os.environ.get("USERPROFILE"))
+        log.info("cli_dir=%r exists_py=%s", cli_dir, os.path.isdir(cli_dir))
         # Тест 1: доступна ли директория claude через cmd?
         r_dir = subprocess.run(f'dir "{cli_dir}"', shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
         log.info("dir test rc=%d bytes=%d err=%r", r_dir.returncode, len(r_dir.stdout), r_dir.stderr[:60])
+        r_dir2 = subprocess.run('echo %APPDATA%', shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+        log.info("cmd APPDATA=%r", r_dir2.stdout.strip())
         # Тест 2: PowerShell вместо cmd
         r_ps = subprocess.run(
             ['powershell', '-NoProfile', '-NonInteractive', '-Command', f'& "{cli}" --version'],
