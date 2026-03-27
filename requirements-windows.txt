@@ -1,0 +1,31 @@
+# Windows-specific dependencies
+# Установка: pip install -r requirements-windows.txt
+
+# Core
+python-dotenv>=1.0.0
+
+# Захват системного аудио (WASAPI loopback)
+PyAudioWPatch>=0.2.12
+
+# Транскрипция (GPU через CUDA)
+faster-whisper>=1.0.0
+
+# PyTorch с CUDA — устанавливать отдельно по инструкции:
+# https://pytorch.org/get-started/locally/
+# pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+# Диаризация
+pyannote.audio>=3.1.0
+
+# LLM
+anthropic>=0.25.0
+
+# Tray
+pystray>=0.19.5
+Pillow>=10.0.0
+
+# UI диалоги
+tkinter  # встроен в стандартный Python
+
+# Уведомления
+plyer>=2.1.0

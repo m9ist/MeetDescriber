@@ -1,0 +1,25 @@
+# macOS-specific dependencies
+# Установка: pip install -r requirements-mac.txt
+# Предварительно: brew install blackhole-2ch
+
+# Core
+python-dotenv>=1.0.0
+
+# Захват системного аудио (через BlackHole виртуальное устройство)
+sounddevice>=0.4.6
+
+# Транскрипция (Apple Silicon / MLX)
+mlx-whisper>=0.3.0
+
+# Диаризация
+pyannote.audio>=3.1.0
+# PyTorch для Mac (MPS backend) — устанавливается автоматически с pyannote
+
+# LLM
+anthropic>=0.25.0
+
+# Tray (menu bar)
+rumps>=0.4.0
+
+# Уведомления
+plyer>=2.1.0

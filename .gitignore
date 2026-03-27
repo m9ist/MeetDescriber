@@ -10,3 +10,4 @@ data/recordings/
 data/documents/
 data/meets.db
 *.log
+.claude/
