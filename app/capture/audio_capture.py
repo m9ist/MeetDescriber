@@ -51,6 +51,7 @@ class AudioCapture:
         self.on_audio_started: Optional[OnAudioStarted] = None
         self.on_audio_stopped: Optional[OnAudioStopped] = None
         self.on_error: Optional[OnError] = None
+        self.on_audio_frame: Optional[Callable[[bytes], None]] = None
 
         self._recording = False
         self._audio_active = False
@@ -125,6 +126,8 @@ class AudioCapture:
 
             while self._recording:
                 data = stream.read(frames_per_read, exception_on_overflow=False)
+                if self.on_audio_frame:
+                    self.on_audio_frame(data)
                 buffer.append(data)
                 frames_buffered += frames_per_read
 
@@ -187,7 +190,10 @@ class AudioCapture:
             nonlocal frames_buffered
             if not self._recording:
                 raise sd.CallbackStop()
-            buffer.append(indata.copy().tobytes())
+            raw = indata.copy().tobytes()
+            if self.on_audio_frame:
+                self.on_audio_frame(raw)
+            buffer.append(raw)
             frames_buffered += frames
             if frames_buffered >= frames_per_chunk:
                 self._process_chunk(b"".join(buffer))

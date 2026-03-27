@@ -31,6 +31,7 @@ from app.storage.db import init_db, get_conn
 from app.capture.audio_capture import AudioCapture, list_audio_sources
 from app.extension.native_host import NativeHost, read_message, send_message
 from app.ui import notifications, tray as tray_module, dialogs
+from app.ui.spectrum import SpectrumWidget
 
 
 class App:
@@ -48,6 +49,8 @@ class App:
         self._root.withdraw()
         self._root.title("for_meets")
         notifications.set_root(self._root)
+
+        self._spectrum = SpectrumWidget(self._root)
 
         # Tray
         self._tray = tray_module.ForMeetsTray(
@@ -162,8 +165,16 @@ class App:
         self._capture = AudioCapture(session_dir=session_dir)
         self._capture.on_quality_low = lambda idx, score: notifications.quality_warning(idx, score)
         self._capture.on_error = lambda e: print(f"[capture error] {e}", file=sys.stderr)
+        self._capture.on_audio_frame = self._spectrum.push_frame
         self._capture.start(device_index=device_index)
 
+        # Обновляем формат в спектре после старта (rate/channels известны из потока)
+        def _update_spectrum_fmt():
+            if self._capture:
+                self._spectrum.set_format(self._capture._rate, self._capture._channels)
+        self._root.after(300, _update_spectrum_fmt)
+
+        self._spectrum.show()
         self._tray.set_recording(True, self._current_title)
 
     def _stop_and_offer_processing(self) -> None:
@@ -172,6 +183,7 @@ class App:
 
         self._capture.stop()
         self._capture = None
+        self._spectrum.hide()
 
         session_id = self._current_session_id
         title = self._current_title
