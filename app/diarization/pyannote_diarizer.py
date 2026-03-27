@@ -87,6 +87,11 @@ class PyannoteDiarizer:
         audio = {"waveform": waveform.cpu(), "sample_rate": rate}
         result = pipeline(audio)
 
+        import logging as _log
+        _log.getLogger(__name__).debug(
+            "DiarizeOutput type=%s attrs=%s", type(result).__name__, dir(result)
+        )
+
         # pyannote 4.x возвращает DiarizeOutput(diarization=Annotation, ...)
         # более старые версии возвращают Annotation напрямую
         annotation = getattr(result, "diarization", result)
