@@ -16,8 +16,10 @@
 """
 import sys
 import io
+import logging
 import threading
 import tkinter as tk
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -27,6 +29,18 @@ if sys.platform == "win32":
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 import config
+
+_LOG_PATH = config.ROOT_DIR / "app.log"
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler(_LOG_PATH, encoding="utf-8"),
+        logging.StreamHandler(sys.stderr),
+    ],
+)
+log = logging.getLogger("app")
+
 from app.storage.db import init_db, get_conn
 from app.capture.audio_capture import AudioCapture, list_audio_sources
 from app.extension.native_host import NativeHost, read_message, send_message
@@ -273,7 +287,11 @@ class App:
 
 
 def main() -> None:
-    App().run()
+    try:
+        App().run()
+    except Exception:
+        log.critical("Unhandled exception:\n%s", traceback.format_exc())
+        raise
 
 
 if __name__ == "__main__":

@@ -13,12 +13,16 @@
 """
 from __future__ import annotations
 
+import logging
 import struct
 import threading
 import tkinter as tk
+import traceback
 from typing import Optional
 
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 N_BARS = 40
 WIDTH = 300
@@ -103,13 +107,13 @@ class SpectrumWidget:
     def _tick(self) -> None:
         if not self._win or not self._win.winfo_exists():
             return
-
-        bars = self._compute_bars()
-        # Экспоненциальное сглаживание + decay
-        for i in range(N_BARS):
-            self._smoothed[i] = max(bars[i], self._smoothed[i] * DECAY)
-
-        self._draw(self._smoothed)
+        try:
+            bars = self._compute_bars()
+            for i in range(N_BARS):
+                self._smoothed[i] = max(bars[i], self._smoothed[i] * DECAY)
+            self._draw(self._smoothed)
+        except Exception:
+            log.error("spectrum _tick error:\n%s", traceback.format_exc())
         self._root.after(UPDATE_MS, self._tick)
 
     def _compute_bars(self) -> list[float]:
