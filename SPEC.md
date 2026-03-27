@@ -132,12 +132,22 @@ YYYY-MM-DD_[название совещания]_followup.md
 
 ## Первоначальная настройка
 
-Скрипт `setup` при первом запуске:
-1. Проверяет наличие зависимостей (Whisper, pyannote, ffmpeg и др.)
-2. Устанавливает браузерное расширение (ссылка + инструкция)
-3. Проверяет доступность системного аудиоустройства (WASAPI / BlackHole)
-4. Проводит тестовую запись и транскрипцию
-5. Выводит результат проверки — всё ли работает корректно
+Скрипт `setup.py` при первом запуске:
+1. Проверяет наличие зависимостей
+2. Создаёт SQLite базу данных
+3. Проверяет гипотезы H1–H8 (аудио, транскрипция, диаризация, Native Messaging)
+4. Регистрирует Chrome-расширение и Native Messaging хост в реестре
+5. Выводит читаемый отчёт с инструкциями по устранению проблем
+
+**Chrome-расширение** устанавливается вручную через `chrome://extensions/` (режим разработчика → загрузить распакованное → `app/extension/chrome`). После установки нужно передать ID расширения:
+```
+python -m app.extension.install_host --update-id <ID>
+```
+
+**Запуск приложения:**
+```
+python -m app.main
+```
 
 ---
 
@@ -145,12 +155,17 @@ YYYY-MM-DD_[название совещания]_followup.md
 
 | Компонент | Решение |
 |-----------|---------|
-| Захват аудио (Windows) | WASAPI loopback |
-| Захват аудио (Mac) | BlackHole / CoreAudio |
-| Транскрипция | Whisper |
-| Диаризация (разделение спикеров) | pyannote.audio |
-| Смысловой анализ и follow-up | Claude API (Anthropic) |
-| Автодетект и список вкладок | Браузерное расширение |
+| Захват аудио (Windows) | `PyAudioWPatch` — WASAPI loopback |
+| Захват аудио (Mac) | `sounddevice` + BlackHole |
+| Транскрипция (Windows) | `faster-whisper` + CUDA |
+| Транскрипция (Mac) | `mlx-whisper` (Apple Silicon) |
+| Диаризация | `pyannote.audio 4.x` |
+| Смысловой анализ и follow-up | Claude API (`anthropic` SDK) |
+| Браузерное расширение | Chrome MV3 + Native Messaging |
+| Native Messaging хост | Python → скомпилирован в .exe (PyInstaller) |
+| Tray / Menu bar | `pystray` |
+| Диалоги и уведомления | `tkinter` |
+| База данных | SQLite (`data/meets.db`) |
 | Формат выходных документов | Markdown (`.md`) |
 | Язык встреч | Русский |
 
