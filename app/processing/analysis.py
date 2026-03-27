@@ -83,29 +83,21 @@ def _call_claude(prompt: str) -> str:
         f.write(prompt.encode("utf-8"))
         tmp_path = f.name
     try:
-        comspec = os.environ.get("COMSPEC", "")
-        log.info("COMSPEC=%r", comspec)
-        # Попытка 1: stdin pipe напрямую (без shell)
-        try:
-            with open(tmp_path, "rb") as fh:
-                r_direct = subprocess.run(
-                    [cli, "-p", "-"],
-                    stdin=fh,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=300,
-                )
-            log.info("direct rc=%d stdout=%d stderr=%r", r_direct.returncode, len(r_direct.stdout or b""), (r_direct.stderr or b"")[:100])
-            result = r_direct
-        except (FileNotFoundError, OSError) as exc:
-            log.warning("direct failed: %s — пробуем shell=True", exc)
-            result = subprocess.run(
-                f'type "{tmp_path}" | "{cli}" -p -',
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=300,
-            )
+        log.info("tmp exists=%s size=%s", os.path.exists(tmp_path), os.path.getsize(tmp_path) if os.path.exists(tmp_path) else "N/A")
+        # Тест: работает ли type вообще?
+        r_type = subprocess.run(f'type "{tmp_path}"', shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+        log.info("type test rc=%d bytes=%d stderr=%r", r_type.returncode, len(r_type.stdout or b""), (r_type.stderr or b"")[:80])
+        # Тест: запускается ли вообще что-нибудь через shell?
+        r_echo = subprocess.run("echo ok", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+        log.info("echo test rc=%d out=%r", r_echo.returncode, r_echo.stdout[:20])
+        # Основной вызов
+        result = subprocess.run(
+            f'type "{tmp_path}" | "{cli}" -p -',
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=300,
+        )
     finally:
         os.unlink(tmp_path)
     stdout_text = (result.stdout or b"").decode("utf-8", errors="replace")
