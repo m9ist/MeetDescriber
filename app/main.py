@@ -285,7 +285,7 @@ class App:
             """).fetchall()
 
             done_rows = conn.execute("""
-                SELECT j.id, s.title, s.started_at
+                SELECT j.id, j.status, s.title, s.started_at
                 FROM jobs j JOIN sessions s ON s.id = j.session_id
                 WHERE j.status = 'done'
                 ORDER BY j.updated_at DESC
