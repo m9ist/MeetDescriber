@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable, Optional
 
 import config
 from app.transcription.backend import (
@@ -38,7 +39,11 @@ def _get_model():
 
 class FasterWhisperBackend(TranscriptionBackend):
 
-    def transcribe(self, audio_path: Path) -> TranscriptionResult:
+    def transcribe(
+        self,
+        audio_path: Path,
+        on_progress: Optional[Callable[[float, float], None]] = None,
+    ) -> TranscriptionResult:
         model = _get_model()
 
         raw_segments, info = model.transcribe(
@@ -48,6 +53,7 @@ class FasterWhisperBackend(TranscriptionBackend):
             vad_filter=True,
         )
 
+        total = info.duration or 0.0
         segments: list[TranscriptionSegment] = []
         for seg in raw_segments:
             words = []
@@ -70,6 +76,8 @@ class FasterWhisperBackend(TranscriptionBackend):
                 confidence=confidence,
                 words=words,
             ))
+            if on_progress and total > 0:
+                on_progress(seg.end, total)
 
         return TranscriptionResult(
             segments=segments,

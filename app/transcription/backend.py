@@ -6,6 +6,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable, Optional
 
 import config
 
@@ -36,8 +37,15 @@ class TranscriptionResult:
 
 class TranscriptionBackend(ABC):
     @abstractmethod
-    def transcribe(self, audio_path: Path) -> TranscriptionResult:
-        """Транскрибирует аудиофайл. Возвращает сегменты с временными метками."""
+    def transcribe(
+        self,
+        audio_path: Path,
+        on_progress: "Optional[Callable[[float, float], None]]" = None,
+    ) -> TranscriptionResult:
+        """Транскрибирует аудиофайл. Возвращает сегменты с временными метками.
+
+        on_progress(current_sec, total_sec) — вызывается после каждого сегмента.
+        """
         ...
 
 

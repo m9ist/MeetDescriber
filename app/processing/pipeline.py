@@ -194,7 +194,11 @@ def run_transcription(
 
         _progress("transcribing")
         backend = get_backend()
-        transcription = backend.transcribe(merged)
+
+        def _on_transcribe_progress(current: float, total: float) -> None:
+            _progress("transcribing", f"{current:.0f}/{total:.0f}")
+
+        transcription = backend.transcribe(merged, on_progress=_on_transcribe_progress)
 
         _progress("diarizing")
         diarizer = PyannoteDiarizer()
