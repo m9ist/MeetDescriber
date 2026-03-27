@@ -106,5 +106,17 @@ def run_host(
 
 
 if __name__ == "__main__":
-    # Запуск напрямую как хост
-    run_host()
+    import logging
+    from pathlib import Path
+    log_path = Path(__file__).parent / "native_host.log"
+    logging.basicConfig(
+        filename=str(log_path),
+        level=logging.DEBUG,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+    logging.info("native_host started")
+    try:
+        run_host()
+        logging.info("native_host exited normally")
+    except Exception as e:
+        logging.exception(f"native_host crashed: {e}")

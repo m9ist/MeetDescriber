@@ -4,6 +4,9 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+app/extension/dist/
+app/extension/build/
+app/extension/*.spec
 .venv/
 venv/
 data/recordings/

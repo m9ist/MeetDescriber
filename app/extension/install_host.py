@@ -19,22 +19,26 @@ if sys.platform == "win32":
 HOST_NAME = "com.for_meets.host"
 
 
-def create_bat_wrapper(python_exe: str, host_script: str) -> Path:
-    """Создаёт .bat обёртку — Chrome на Windows не умеет запускать Python напрямую с аргументами."""
-    bat_path = Path(host_script).parent / "for_meets_host.bat"
-    bat_path.write_text(
-        f'@echo off\n"{python_exe}" "{host_script}" %*\n',
-        encoding="utf-8",
-    )
-    return bat_path
+def get_exe_path(host_script: str) -> str:
+    """
+    Chrome на Windows требует .exe — .bat не запускается через CreateProcess.
+    Возвращает путь к скомпилированному for_meets_host.exe.
+    """
+    exe = Path(host_script).parent / "dist" / "for_meets_host.exe"
+    if not exe.exists():
+        raise FileNotFoundError(
+            f"for_meets_host.exe не найден: {exe}\n"
+            "Собери его: python -m PyInstaller --onefile --name for_meets_host "
+            "app/extension/native_host.py --distpath app/extension/dist"
+        )
+    return str(exe)
 
 
 def get_host_manifest(python_exe: str, host_script: str) -> dict:
     if platform.system() == "Windows":
-        bat = create_bat_wrapper(python_exe, host_script)
-        path = str(bat)
+        path = get_exe_path(host_script)
     else:
-        path = python_exe  # на Mac .sh или shebang-скрипт
+        path = python_exe
     return {
         "name": HOST_NAME,
         "description": "for_meets Native Messaging Host",
