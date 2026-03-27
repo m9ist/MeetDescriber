@@ -12,7 +12,7 @@ sounddevice>=0.4.6
 mlx-whisper>=0.3.0
 
 # Диаризация
-pyannote.audio>=3.1.0
+pyannote.audio==3.3.2
 # PyTorch для Mac (MPS backend) — устанавливается автоматически с pyannote
 
 # LLM

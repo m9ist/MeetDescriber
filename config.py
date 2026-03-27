@@ -3,9 +3,26 @@
 """
 import os
 import sys
+import site
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# На Windows Python 3.8+ DLL-поиск не включает site-packages автоматически.
+# Регистрируем все nvidia/*/bin директории чтобы ctranslate2 нашёл cublas/cudnn.
+if sys.platform == "win32":
+    _all_site = site.getsitepackages() + [site.getusersitepackages()]
+    _extra_paths = []
+    for _sp in _all_site:
+        _nvidia = os.path.join(_sp, "nvidia")
+        if os.path.isdir(_nvidia):
+            for _pkg in os.listdir(_nvidia):
+                _bin = os.path.join(_nvidia, _pkg, "bin")
+                if os.path.isdir(_bin):
+                    _extra_paths.append(_bin)
+                    os.add_dll_directory(_bin)
+    if _extra_paths:
+        os.environ["PATH"] = os.pathsep.join(_extra_paths) + os.pathsep + os.environ.get("PATH", "")
 
 ROOT_DIR = Path(__file__).parent
 DATA_DIR = ROOT_DIR / "data"
@@ -17,6 +34,10 @@ load_dotenv(ROOT_DIR / ".env")
 
 HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
+# faster-whisper и huggingface_hub читают HF_TOKEN из окружения напрямую
+if HUGGINGFACE_TOKEN and not os.getenv("HF_TOKEN"):
+    os.environ["HF_TOKEN"] = HUGGINGFACE_TOKEN
 
 # Платформа
 IS_WINDOWS = sys.platform == "win32"

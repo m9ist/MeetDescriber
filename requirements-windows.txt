@@ -15,7 +15,7 @@ faster-whisper>=1.0.0
 # pip install torch --index-url https://download.pytorch.org/whl/cu121
 
 # Диаризация
-pyannote.audio>=3.1.0
+pyannote.audio==3.3.2
 
 # LLM
 anthropic>=0.25.0
@@ -24,8 +24,7 @@ anthropic>=0.25.0
 pystray>=0.19.5
 Pillow>=10.0.0
 
-# UI диалоги
-tkinter  # встроен в стандартный Python
+# UI диалоги: tkinter — встроен в стандартный Python, не устанавливается через pip
 
 # Уведомления
 plyer>=2.1.0

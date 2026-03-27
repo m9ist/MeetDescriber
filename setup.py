@@ -7,12 +7,18 @@
 При провале критической гипотезы останавливается и объясняет что делать.
 """
 import sys
+import io
 import time
 import wave
 import struct
 import tempfile
 import subprocess
 from pathlib import Path
+
+# Принудительно UTF-8 для вывода в терминал Windows
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # ── вывод ──────────────────────────────────────────────────────────────────
 
@@ -279,10 +285,16 @@ def check_h3_h4_transcription() -> bool:
         info("Загружаем модель 'small' (первый запуск скачает ~500 МБ)...")
         try:
             model = WhisperModel("small", device="cuda", compute_type="float16")
-        except Exception:
-            info("CUDA недоступна, пробуем CPU...")
+        except Exception as cuda_err:
+            if "cublas" in str(cuda_err).lower() or "cudnn" in str(cuda_err).lower() or "cuda" in str(cuda_err).lower():
+                fail(f"CUDA runtime DLL не найдены: {cuda_err}")
+                info("Установи CUDA runtime:")
+                info("  pip install --user nvidia-cublas-cu12 nvidia-cudnn-cu12")
+                info("Или скачай CUDA Toolkit 12.x: https://developer.nvidia.com/cuda-downloads")
+                info("Пробуем CPU-режим как fallback...")
             try:
                 model = WhisperModel("small", device="cpu", compute_type="int8")
+                info("Модель загружена на CPU (GPU будет доступен после установки CUDA runtime)")
             except Exception as e:
                 fail(f"Не удалось загрузить модель: {e}")
                 record_result(label, False)
@@ -350,7 +362,7 @@ def check_h5_diarization() -> bool:
                               else "cpu")
         pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
-            use_auth_token=cfg.HUGGINGFACE_TOKEN,
+            token=cfg.HUGGINGFACE_TOKEN,
         ).to(device)
         ok(f"Pipeline загружен (device: {device})")
     except Exception as e:
@@ -359,22 +371,24 @@ def check_h5_diarization() -> bool:
         record_result("H5", False)
         return False
 
-    info("Тест на синтетическом файле (диаризация на синусоиде — ожидаем 1 спикера)...")
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        test_wav = Path(f.name)
-    generate_sine_wav(test_wav, duration=5.0)
+    info("Тест на синтетическом сигнале (передаём тензор напрямую, минуя torchcodec)...")
 
     try:
-        diarization = pipeline(str(test_wav))
+        import math as _math
+        rate = 16000
+        t = torch.arange(int(rate * 5), dtype=torch.float32) / rate
+        waveform = torch.sin(2 * _math.pi * 440 * t).unsqueeze(0).to(device)
+        audio = {"waveform": waveform, "sample_rate": rate}
+        result = pipeline(audio)
+        # pyannote 4.x возвращает DiarizeOutput, 3.x — Annotation напрямую
+        diarization = getattr(result, "speaker_diarization", result)
         speakers = set(diarization.labels())
-        ok(f"Диаризация работает. Обнаружено спикеров: {len(speakers)}")
+        ok(f"Диаризация работает. Обнаружено спикеров: {len(speakers)} (0 — норма для синусоиды)")
         record_result("H5", True)
     except Exception as e:
         fail(f"Ошибка диаризации: {e}")
         record_result("H5", False)
         return False
-    finally:
-        test_wav.unlink(missing_ok=True)
 
     return True
 
