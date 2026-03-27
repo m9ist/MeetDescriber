@@ -94,11 +94,12 @@ def _call_claude(prompt: str) -> str:
         import glob as _glob, shutil as _shutil
         log.info("CLAUDE_CLI env=%r", os.environ.get("CLAUDE_CLI"))
         log.info("isfile=%s isdir=%s home=%r", os.path.isfile(cli), os.path.isdir(cli_dir), str(Path.home()))
-        try:
-            _cc = str(Path.home() / "AppData" / "Roaming" / "Claude" / "claude-code")
-            log.info("listdir(claude-code)=%r", os.listdir(_cc))
-        except Exception as _e:
-            log.info("listdir(claude-code) err=%r", _e)
+        for _sub in ["AppData", "AppData\\Roaming", "AppData\\Roaming\\Claude"]:
+            _p = str(Path.home() / _sub)
+            try:
+                log.info("listdir(%s)=%r", _sub, os.listdir(_p)[:8])
+            except Exception as _e:
+                log.info("listdir(%s) err=%r", _sub, _e)
         log.info("which(claude)=%r", _shutil.which("claude"))
         # Тест 1: доступна ли директория claude через cmd?
         r_dir = subprocess.run(f'dir "{cli_dir}"', shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
