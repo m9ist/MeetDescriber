@@ -85,10 +85,14 @@ class PyannoteDiarizer:
         waveform, rate = _load_wav_as_tensor(audio_path)
 
         audio = {"waveform": waveform.cpu(), "sample_rate": rate}
-        diarization = pipeline(audio)
+        result = pipeline(audio)
+
+        # pyannote 4.x возвращает DiarizeOutput(diarization=Annotation, ...)
+        # более старые версии возвращают Annotation напрямую
+        annotation = getattr(result, "diarization", result)
 
         segments: list[DiarizationSegment] = []
-        for turn, _, speaker in diarization.itertracks(yield_label=True):
+        for turn, _, speaker in annotation.itertracks(yield_label=True):
             segments.append(DiarizationSegment(
                 start=turn.start,
                 end=turn.end,
