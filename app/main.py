@@ -215,16 +215,22 @@ class App:
         self._tray.set_recording(False)
         self._refresh_tray_jobs()
 
-        def process():
-            self._create_job(session_id)
-            self._refresh_tray_jobs()
-
-        def later():
-            pass  # задание уже создано при остановке — видно в трее
-
-        # Создаём задание сразу (pending), предлагаем обработать
+        # Создаём задание сразу (pending), берём его id
         self._create_job(session_id)
         self._refresh_tray_jobs()
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT id FROM jobs WHERE session_id=?", (session_id,)
+            ).fetchone()
+        job_id = row["id"] if row else None
+
+        def process():
+            if job_id is not None:
+                self._on_process_job(job_id)
+
+        def later():
+            pass  # задание видно в трее, запустить можно оттуда
+
         notifications.process_now(title, on_process=process, on_later=later)
 
     def _create_job(self, session_id: int) -> None:
