@@ -61,9 +61,12 @@ def get_conn():
 
 
 def init_db() -> None:
-    """Создаёт таблицы если их нет."""
+    """Создаёт таблицы если их нет. Сбрасывает зависшие 'processing' задания в 'pending'."""
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        conn.execute(
+            "UPDATE jobs SET status='pending', updated_at=datetime('now') WHERE status='processing'"
+        )
 
 
 def db_exists() -> bool:
