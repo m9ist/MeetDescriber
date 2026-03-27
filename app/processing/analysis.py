@@ -90,6 +90,9 @@ def _call_claude(prompt: str) -> str:
         # Тест: запускается ли вообще что-нибудь через shell?
         r_echo = subprocess.run("echo ok", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
         log.info("echo test rc=%d out=%r", r_echo.returncode, r_echo.stdout[:20])
+        # Тест: запускается ли claude без pipe?
+        r_cv = subprocess.run(f'"{cli}" --version', shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
+        log.info("claude --version rc=%d out=%r err=%r", r_cv.returncode, r_cv.stdout[:80], r_cv.stderr[:80])
         # Основной вызов
         result = subprocess.run(
             f'type "{tmp_path}" | "{cli}" -p -',
