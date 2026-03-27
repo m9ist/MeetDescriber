@@ -1,0 +1,9 @@
+{
+  "name": "com.for_meets.host",
+  "description": "for_meets Native Messaging Host",
+  "path": "K:\\repos\\for_meets\\app\\extension\\for_meets_host.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://hbjhkeggcjcmhkdlhiidekncjfkfhamg/"
+  ]
+}

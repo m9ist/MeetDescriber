@@ -1,27 +1,46 @@
-"""
+r"""
 Регистрирует Native Messaging хост в Windows реестре / Mac LaunchAgents.
 
 Windows: HKCU\Software\Google\Chrome\NativeMessagingHosts\com.for_meets.host
 Mac:     ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/
 """
 
+import io
 import json
 import platform
 import subprocess
 import sys
 from pathlib import Path
 
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
 
 HOST_NAME = "com.for_meets.host"
 
 
+def create_bat_wrapper(python_exe: str, host_script: str) -> Path:
+    """Создаёт .bat обёртку — Chrome на Windows не умеет запускать Python напрямую с аргументами."""
+    bat_path = Path(host_script).parent / "for_meets_host.bat"
+    bat_path.write_text(
+        f'@echo off\n"{python_exe}" "{host_script}" %*\n',
+        encoding="utf-8",
+    )
+    return bat_path
+
+
 def get_host_manifest(python_exe: str, host_script: str) -> dict:
+    if platform.system() == "Windows":
+        bat = create_bat_wrapper(python_exe, host_script)
+        path = str(bat)
+    else:
+        path = python_exe  # на Mac .sh или shebang-скрипт
     return {
         "name": HOST_NAME,
         "description": "for_meets Native Messaging Host",
-        "path": python_exe,
+        "path": path,
         "type": "stdio",
-        "allowed_origins": [],  # заполняется после установки расширения
+        "allowed_origins": [],
     }
 
 
