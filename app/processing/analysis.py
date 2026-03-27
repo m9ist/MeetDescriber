@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -74,20 +75,31 @@ def _build_prompt(
 
 
 def _call_claude(prompt: str) -> str:
-    """Вызывает claude -p через subprocess. Использует подписку, не API-кредиты."""
-    log.info("Запуск claude CLI для анализа...")
-    result = subprocess.run(
-        [config.CLAUDE_CLI, "-p", prompt],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=300,
-    )
+    """Вызывает claude -p, передавая промпт через временный файл и pipe cmd.exe."""
+    import tempfile
+    cli = config._find_claude_cli()
+    log.info("Запуск claude CLI: %r", cli)
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".txt", delete=False) as f:
+        f.write(prompt.encode("utf-8"))
+        tmp_path = f.name
+    try:
+        result = subprocess.run(
+            f'type "{tmp_path}" | "{cli}" -p -',
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=300,
+        )
+    finally:
+        os.unlink(tmp_path)
+    stdout_text = (result.stdout or b"").decode("utf-8", errors="replace")
+    stderr_text = (result.stderr or b"").decode("cp1251", errors="replace")
+    log.info("claude rc=%d stdout=%d chars stderr=%r", result.returncode, len(stdout_text), stderr_text[:200])
     if result.returncode != 0:
         raise RuntimeError(
-            f"claude CLI завершился с кодом {result.returncode}: {result.stderr[:500]}"
+            f"claude CLI завершился с кодом {result.returncode}: {stderr_text[:300]}"
         )
-    text = result.stdout.strip()
+    text = stdout_text.strip()
     if not text:
         raise RuntimeError("claude CLI вернул пустой ответ")
     return text
