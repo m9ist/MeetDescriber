@@ -35,9 +35,11 @@ def get_doc_paths(title: str, started_at: str) -> dict[str, Path]:
     name = _safe_name(title)
     base = config.DOCUMENTS_DIR / f"{date}_{name}"
     return {
-        "transcription": Path(f"{base}_transcription.md"),
-        "analysis":      Path(f"{base}_analysis.md"),
-        "followup":      Path(f"{base}_followup.md"),
+        "transcription":     Path(f"{base}_transcription.md"),
+        "analysis":          Path(f"{base}_analysis.md"),
+        "analysis_prompt":   Path(f"{base}_analysis_prompt.md"),
+        "followup":          Path(f"{base}_followup.md"),
+        "followup_prompt":   Path(f"{base}_followup_prompt.md"),
     }
 
 

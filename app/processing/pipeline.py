@@ -169,79 +169,84 @@ def run_transcription(job_id: int) -> Optional[Path]:
 
     # Путь к записям
     session_dir = config.RECORDINGS_DIR / f"session_{session_id}"
-
-    # Шаг 1: слить чанки
-    _set_job_status(job_id, "processing")
-    merged = file_manager.merge_chunks(session_dir)
-    if not merged:
-        _set_job_status(job_id, "error", "Нет аудиофайлов в сессии")
-        return None
-
-    # Шаг 2: транскрипция
-    backend = get_backend()
-    transcription = backend.transcribe(merged)
-
-    # Шаг 3: диаризация
-    diarizer = PyannoteDiarizer()
-    diarization = diarizer.diarize(merged)
-
-    # Шаг 4: выравнивание
-    aligned = _assign_speakers(transcription, diarization)
-
-    # Шаг 5: детекция имён
-    saved_names = _load_saved_speakers(session_id)
-    detected_names = _detect_names(aligned)
-    speaker_map = _build_speaker_map(aligned, detected_names, saved_names)
-
-    # Шаг 6: сохранить спикеров в БД
-    _save_speakers(session_id, speaker_map)
-
-    # Шаг 7: записать transcription.md
     doc_paths = file_manager.get_doc_paths(title, started_at)
-    file_manager.write_transcription_md(
-        path=doc_paths["transcription"],
-        title=title,
-        started_at=started_at,
-        agenda=agenda,
-        duration=transcription.duration,
-        speaker_map=speaker_map,
-        segments=aligned,
-    )
 
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE jobs SET transcription_path=? WHERE id=?",
-            (str(doc_paths["transcription"]), job_id),
-        )
+    # ── Этап 2: транскрипция + диаризация ────────────────────────────────────
+    if job.get("transcription_path") and Path(job["transcription_path"]).exists():
+        # Уже сделано — пропускаем
+        pass
+    else:
+        _set_job_status(job_id, "processing")
+        merged = file_manager.merge_chunks(session_dir)
+        if not merged:
+            _set_job_status(job_id, "error", "Нет аудиофайлов в сессии")
+            return None
 
-    # Этап 5а: смысловой анализ
-    from app.processing.analysis import write_analysis_md
-    write_analysis_md(
-        path=doc_paths["analysis"],
-        title=title,
-        started_at=started_at,
-        agenda=agenda,
-        transcription_path=doc_paths["transcription"],
-    )
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE jobs SET analysis_path=? WHERE id=?",
-            (str(doc_paths["analysis"]), job_id),
-        )
+        backend = get_backend()
+        transcription = backend.transcribe(merged)
 
-    # Этап 5б: follow-up
-    from app.processing.followup import write_followup_md
-    write_followup_md(
-        path=doc_paths["followup"],
-        title=title,
-        started_at=started_at,
-        analysis_path=doc_paths["analysis"],
-    )
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE jobs SET followup_path=? WHERE id=?",
-            (str(doc_paths["followup"]), job_id),
+        diarizer = PyannoteDiarizer()
+        diarization = diarizer.diarize(merged)
+
+        aligned = _assign_speakers(transcription, diarization)
+
+        saved_names = _load_saved_speakers(session_id)
+        detected_names = _detect_names(aligned)
+        speaker_map = _build_speaker_map(aligned, detected_names, saved_names)
+        _save_speakers(session_id, speaker_map)
+
+        file_manager.write_transcription_md(
+            path=doc_paths["transcription"],
+            title=title,
+            started_at=started_at,
+            agenda=agenda,
+            duration=transcription.duration,
+            speaker_map=speaker_map,
+            segments=aligned,
         )
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE jobs SET transcription_path=?, status='transcribed', "
+                "updated_at=datetime('now') WHERE id=?",
+                (str(doc_paths["transcription"]), job_id),
+            )
+
+    # ── Этап 5а: анализ ───────────────────────────────────────────────────────
+    if job.get("analysis_path") and Path(job["analysis_path"]).exists():
+        pass
+    else:
+        from app.processing.analysis import write_analysis_md
+        write_analysis_md(
+            path=doc_paths["analysis"],
+            title=title,
+            started_at=started_at,
+            agenda=agenda,
+            transcription_path=doc_paths["transcription"],
+            prompt_path=doc_paths["analysis_prompt"],
+        )
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE jobs SET analysis_path=?, updated_at=datetime('now') WHERE id=?",
+                (str(doc_paths["analysis"]), job_id),
+            )
+
+    # ── Этап 5б: follow-up ────────────────────────────────────────────────────
+    if job.get("followup_path") and Path(job["followup_path"]).exists():
+        pass
+    else:
+        from app.processing.followup import write_followup_md
+        write_followup_md(
+            path=doc_paths["followup"],
+            title=title,
+            started_at=started_at,
+            analysis_path=doc_paths["analysis"],
+            prompt_path=doc_paths["followup_prompt"],
+        )
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE jobs SET followup_path=?, updated_at=datetime('now') WHERE id=?",
+                (str(doc_paths["followup"]), job_id),
+            )
 
     _set_job_status(job_id, "done")
     return doc_paths["transcription"]

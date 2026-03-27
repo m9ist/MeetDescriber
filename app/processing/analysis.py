@@ -1,19 +1,17 @@
 """
-Смысловой анализ расшифровки через Claude API.
+Смысловой анализ расшифровки через claude CLI.
 
-Промпт извлекает:
-  - Ключевые тезисы с временными метками и авторами
-  - Принятые решения
-  - Договорённости
-  - Открытые вопросы
-
+Промпт сохраняется в *_analysis_prompt.md — можно запустить вручную.
 Результат: _analysis.md
 """
 from __future__ import annotations
 
+import logging
+import subprocess
 from pathlib import Path
+from typing import Optional
 
-import config
+log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
 Ты — аналитик деловых переговоров. Тебе дана расшифровка совещания.
@@ -55,35 +53,42 @@ USER_PROMPT_TEMPLATE = """\
 """
 
 
-def run_analysis(
+def _build_prompt(
     transcription_path: Path,
     title: str,
     started_at: str,
     agenda: str,
 ) -> str:
-    """Отправляет расшифровку в Claude и возвращает текст анализа."""
-    import anthropic
-
     transcription_text = transcription_path.read_text(encoding="utf-8")
     date = (started_at or "")[:10]
     agenda_block = f"**Агенда:** {agenda.strip()}" if agenda and agenda.strip() else ""
-
     user_prompt = USER_PROMPT_TEMPLATE.format(
         title=title,
         date=date,
         agenda_block=agenda_block,
         transcription=transcription_text,
     )
+    return SYSTEM_PROMPT + "\n\n---\n\n" + user_prompt
 
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=4096,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_prompt}],
+
+def _call_claude(prompt: str) -> str:
+    """Вызывает claude -p через subprocess. Использует подписку, не API-кредиты."""
+    log.info("Запуск claude CLI для анализа...")
+    result = subprocess.run(
+        ["claude", "-p", prompt],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=300,
     )
-
-    return message.content[0].text
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"claude CLI завершился с кодом {result.returncode}: {result.stderr[:500]}"
+        )
+    text = result.stdout.strip()
+    if not text:
+        raise RuntimeError("claude CLI вернул пустой ответ")
+    return text
 
 
 def write_analysis_md(
@@ -92,9 +97,17 @@ def write_analysis_md(
     started_at: str,
     agenda: str,
     transcription_path: Path,
+    prompt_path: Optional[Path] = None,
 ) -> Path:
-    """Генерирует _analysis.md. Возвращает путь."""
-    analysis_text = run_analysis(transcription_path, title, started_at, agenda)
+    """Генерирует _analysis.md. Сохраняет промпт рядом. Возвращает путь."""
+    prompt = _build_prompt(transcription_path, title, started_at, agenda)
+
+    if prompt_path:
+        prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        prompt_path.write_text(prompt, encoding="utf-8")
+        log.info("Промпт анализа сохранён: %s", prompt_path)
+
+    analysis_text = _call_claude(prompt)
 
     date = (started_at or "")[:10]
     header = f"# Смысловой анализ: {title or 'Встреча'}\n\n**Дата:** {date}\n\n---\n\n"

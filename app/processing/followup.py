@@ -1,14 +1,17 @@
 """
-Генерация структурированного follow-up через Claude API.
+Генерация структурированного follow-up через claude CLI.
 
-Использует analysis.md как входные данные (уже отфильтрованный смысл).
+Промпт сохраняется в *_followup_prompt.md — можно запустить вручную.
 Результат: _followup.md
 """
 from __future__ import annotations
 
+import logging
+import subprocess
 from pathlib import Path
+from typing import Optional
 
-import config
+log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
 Ты — бизнес-ассистент. Тебе дан смысловой анализ совещания.
@@ -48,32 +51,35 @@ USER_PROMPT_TEMPLATE = """\
 """
 
 
-def run_followup(
-    analysis_path: Path,
-    title: str,
-    started_at: str,
-) -> str:
-    """Отправляет анализ в Claude и возвращает текст follow-up."""
-    import anthropic
-
+def _build_prompt(analysis_path: Path, title: str, started_at: str) -> str:
     analysis_text = analysis_path.read_text(encoding="utf-8")
     date = (started_at or "")[:10]
-
     user_prompt = USER_PROMPT_TEMPLATE.format(
         title=title,
         date=date,
         analysis=analysis_text,
     )
+    return SYSTEM_PROMPT + "\n\n---\n\n" + user_prompt
 
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2048,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_prompt}],
+
+def _call_claude(prompt: str) -> str:
+    """Вызывает claude -p через subprocess. Использует подписку, не API-кредиты."""
+    log.info("Запуск claude CLI для follow-up...")
+    result = subprocess.run(
+        ["claude", "-p", prompt],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=300,
     )
-
-    return message.content[0].text
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"claude CLI завершился с кодом {result.returncode}: {result.stderr[:500]}"
+        )
+    text = result.stdout.strip()
+    if not text:
+        raise RuntimeError("claude CLI вернул пустой ответ")
+    return text
 
 
 def write_followup_md(
@@ -81,9 +87,17 @@ def write_followup_md(
     title: str,
     started_at: str,
     analysis_path: Path,
+    prompt_path: Optional[Path] = None,
 ) -> Path:
-    """Генерирует _followup.md. Возвращает путь."""
-    followup_text = run_followup(analysis_path, title, started_at)
+    """Генерирует _followup.md. Сохраняет промпт рядом. Возвращает путь."""
+    prompt = _build_prompt(analysis_path, title, started_at)
+
+    if prompt_path:
+        prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        prompt_path.write_text(prompt, encoding="utf-8")
+        log.info("Промпт follow-up сохранён: %s", prompt_path)
+
+    followup_text = _call_claude(prompt)
 
     date = (started_at or "")[:10]
     header = f"# Follow-up: {title or 'Встреча'}\n\n**Дата:** {date}\n\n---\n\n"
