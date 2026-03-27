@@ -62,6 +62,7 @@ class App:
         self._root = tk.Tk()
         self._root.withdraw()
         self._root.title("for_meets")
+        self._root.report_callback_exception = self._on_tk_error
         notifications.set_root(self._root)
 
         self._spectrum = SpectrumWidget(self._root)
@@ -178,7 +179,7 @@ class App:
 
         self._capture = AudioCapture(session_dir=session_dir)
         self._capture.on_quality_low = lambda idx, score: notifications.quality_warning(idx, score)
-        self._capture.on_error = lambda e: print(f"[capture error] {e}", file=sys.stderr)
+        self._capture.on_error = lambda e: log.error("capture error: %s", e, exc_info=e)
         self._capture.on_audio_frame = self._spectrum.push_frame
         self._capture.start(device_index=device_index)
 
@@ -249,7 +250,7 @@ class App:
                 path = run_transcription(job_id)
                 print(f"[app] job {job_id} done → {path}")
             except Exception as e:
-                print(f"[app] job {job_id} error: {e}", file=sys.stderr)
+                log.error("job %d error: %s", job_id, e, exc_info=True)
             finally:
                 self._root.after(0, self._refresh_tray_jobs)
 
@@ -279,6 +280,10 @@ class App:
         )
 
     # ── Выход ─────────────────────────────────────────────────────────────────
+
+    def _on_tk_error(self, exc_type, exc_val, exc_tb) -> None:
+        log.critical("Tkinter callback error:\n%s",
+                     "".join(traceback.format_exception(exc_type, exc_val, exc_tb)))
 
     def _on_quit(self) -> None:
         if self._capture and self._capture.is_recording:
