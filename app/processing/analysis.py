@@ -90,18 +90,29 @@ def _call_claude(prompt: str) -> str:
         # Тест: запускается ли вообще что-нибудь через shell?
         r_echo = subprocess.run("echo ok", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
         log.info("echo test rc=%d out=%r", r_echo.returncode, r_echo.stdout[:20])
-        # Тест: помогает ли DEVNULL stdin?
-        r_cv = subprocess.run(f'"{cli}" --version', shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
-        log.info("claude --version (DEVNULL) rc=%d out=%r err=%r", r_cv.returncode, r_cv.stdout[:80], r_cv.stderr[:80])
-        # Основной вызов
-        result = subprocess.run(
-            f'type "{tmp_path}" | "{cli}" -p -',
-            shell=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=300,
+        cli_dir = os.path.dirname(cli)
+        # Тест 1: доступна ли директория claude через cmd?
+        r_dir = subprocess.run(f'dir "{cli_dir}"', shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+        log.info("dir test rc=%d bytes=%d err=%r", r_dir.returncode, len(r_dir.stdout), r_dir.stderr[:60])
+        # Тест 2: PowerShell вместо cmd
+        r_ps = subprocess.run(
+            ['powershell', '-NoProfile', '-NonInteractive', '-Command', f'& "{cli}" --version'],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20,
         )
+        log.info("powershell claude rc=%d out=%r err=%r", r_ps.returncode, r_ps.stdout[:80], r_ps.stderr[:80])
+        # Основной вызов — пробуем PowerShell pipe
+        if r_ps.returncode == 0:
+            log.info("PowerShell работает — используем его для основного вызова")
+            result = subprocess.run(
+                ['powershell', '-NoProfile', '-NonInteractive', '-Command',
+                 f'Get-Content -Raw -Encoding UTF8 "{tmp_path}" | & "{cli}" -p -'],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300,
+            )
+        else:
+            result = subprocess.run(
+                f'type "{tmp_path}" | "{cli}" -p -',
+                shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300,
+            )
     finally:
         os.unlink(tmp_path)
     stdout_text = (result.stdout or b"").decode("utf-8", errors="replace")
