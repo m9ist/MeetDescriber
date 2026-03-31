@@ -40,8 +40,8 @@ def _make_icon(recording: bool = False) -> Image.Image:
             py = int(32 + math.sin(t) * 14 * (1 - abs(px - 32) / 32))
             pts.append((px, py))
         for i in range(len(pts) - 1):
-            draw.line([pts[i], pts[i + 1]], fill="#26c6da", width=2)
-        draw.ellipse([27, 27, 37, 37], fill="#ef5350", outline="#ffffff", width=1)
+            draw.line([pts[i], pts[i + 1]], fill="#ffffff", width=4)
+        draw.ellipse([27, 27, 37, 37], fill="#ff1744", outline="#ffffff", width=2)
 
     return img
 
