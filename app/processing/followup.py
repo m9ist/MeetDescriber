@@ -128,7 +128,8 @@ def write_followup_md(
             raise
         log.warning("CLI недоступен (%s) — показываем диалог ручного запуска", e)
         cli = config._find_claude_cli()
-        result = ask_claude("follow-up", prompt_path, cli)
+        result = ask_claude("follow-up", prompt_path, cli,
+                            input_path=analysis_path, output_path=path)
         if result is None:
             raise RuntimeError("Пользователь отменил генерацию follow-up") from e
         followup_text = result

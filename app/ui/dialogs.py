@@ -178,10 +178,14 @@ class ClaudeManualDialog:
         prompt_path: Optional[Path],
         cli: str,
         result_queue: queue.Queue,
+        input_path: Optional[Path] = None,
+        output_path: Optional[Path] = None,
     ) -> None:
         self._prompt_path = prompt_path
         self._cli = cli
         self._queue = result_queue
+        self._input_path = input_path    # файл-источник (транскрипция / анализ)
+        self._output_path = output_path  # куда писать результат
 
         win = tk.Toplevel(parent)
         win.title(f"Claude CLI недоступен — {stage}")
@@ -318,16 +322,38 @@ class ClaudeManualDialog:
         if self._prompt_path is None:
             self._set_status("Промпт не найден", error=True)
             return
-        # Выводной файл: убираем _prompt из имени (_analysis_prompt.md → _analysis.md)
-        out_path = Path(str(self._prompt_path).replace("_prompt.md", ".md"))
-        text = (
-            f"Прочитай промпт из файла:\n"
-            f"{self._prompt_path}\n\n"
-            f"Выполни задание из этого промпта и запиши результат в файл:\n"
-            f"{out_path}"
-        )
+        try:
+            prompt_text = self._prompt_path.read_text(encoding="utf-8")
+        except Exception as e:
+            self._set_status(f"Не удалось прочитать промпт: {e}", error=True)
+            return
+
+        # Заменяем блок с содержимым файла-источника на путь к файлу.
+        # Структура промпта: "## Расшифровка\n\n{content}\n\n---"
+        # или "## Смысловой анализ\n\n{content}\n\n---"
+        if self._input_path:
+            for section_header in ("## Расшифровка\n\n", "## Смысловой анализ\n\n"):
+                idx = prompt_text.find(section_header)
+                if idx == -1:
+                    continue
+                content_start = idx + len(section_header)
+                end_marker = "\n\n---"
+                end_idx = prompt_text.find(end_marker, content_start)
+                if end_idx == -1:
+                    continue
+                prompt_text = (
+                    prompt_text[:content_start]
+                    + f"[файл: {self._input_path}]"
+                    + prompt_text[end_idx:]
+                )
+                break
+
+        # Добавляем инструкцию записи результата
+        out_path = self._output_path or Path(str(self._prompt_path).replace("_prompt.md", ".md"))
+        prompt_text = prompt_text.rstrip() + f"\n\n---\n\nЗапиши результат в файл:\n{out_path}"
+
         self._win.clipboard_clear()
-        self._win.clipboard_append(text)
+        self._win.clipboard_append(prompt_text)
         self._set_status("Промпт скопирован в буфер обмена")
         self._set_status("Промпт скопирован в буфер обмена")
 

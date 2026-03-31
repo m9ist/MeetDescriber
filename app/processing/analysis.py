@@ -138,7 +138,8 @@ def write_analysis_md(
             raise
         log.warning("CLI недоступен (%s) — показываем диалог ручного запуска", e)
         cli = config._find_claude_cli()
-        result = ask_claude("анализ", prompt_path, cli)
+        result = ask_claude("анализ", prompt_path, cli,
+                            input_path=transcription_path, output_path=path)
         if result is None:
             raise RuntimeError("Пользователь отменил генерацию анализа") from e
         analysis_text = result
