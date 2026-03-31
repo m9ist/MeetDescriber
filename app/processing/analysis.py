@@ -51,7 +51,7 @@ def _build_chat_prompt(
         title=title,
         date=date,
         agenda_block=agenda_block,
-        transcription=f"[файл: {transcription_path}]",
+        transcription=f"[файл: {transcription_path}]\n(читай файл по 100 строк)",
     )
     return (
         SYSTEM_PROMPT
