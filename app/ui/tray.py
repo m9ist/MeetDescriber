@@ -53,12 +53,16 @@ class ForMeetsTray:
         on_process_job: Callable[[int], None],
         on_quit: Callable[[], None],
         on_edit_job: Callable[[int], None] = None,
+        on_delete_job: Callable[[int], None] = None,
+        on_delete_all_pending: Callable[[], None] = None,
     ) -> None:
         self._on_start_manual = on_start_manual
         self._on_stop = on_stop
         self._on_process_job = on_process_job
         self._on_quit = on_quit
         self._on_edit_job = on_edit_job
+        self._on_delete_job = on_delete_job
+        self._on_delete_all_pending = on_delete_all_pending
 
         self._recording = False
         self._status_text = "Ожидание"
@@ -120,10 +124,15 @@ class ForMeetsTray:
             pending_items = [
                 pystray.MenuItem(
                     self._job_label(j),
-                    self._make_job_handler(j["id"]),
+                    self._make_pending_submenu(j),
                 )
                 for j in self._pending_jobs
             ]
+            pending_items.append(pystray.Menu.SEPARATOR)
+            pending_items.append(pystray.MenuItem(
+                "Удалить все необработанные",
+                self._handle_delete_all_pending,
+            ))
             items.append(pystray.MenuItem(
                 f"Необработанные ({len(self._pending_jobs)})",
                 pystray.Menu(*pending_items),
@@ -219,10 +228,29 @@ class ForMeetsTray:
             pystray.MenuItem("Информация о совещании", edit_info),
         )
 
+    def _make_pending_submenu(self, job: dict) -> pystray.Menu:
+        job_id = job["id"]
+
+        def process(icon, item):
+            self._on_process_job(job_id)
+
+        def delete(icon, item):
+            if self._on_delete_job:
+                self._on_delete_job(job_id)
+
+        return pystray.Menu(
+            pystray.MenuItem("Обработать", process),
+            pystray.MenuItem("Удалить", delete),
+        )
+
     def _make_job_handler(self, job_id: int) -> Callable:
         def handler(icon, item):
             self._on_process_job(job_id)
         return handler
+
+    def _handle_delete_all_pending(self, icon, item) -> None:
+        if self._on_delete_all_pending:
+            self._on_delete_all_pending()
 
     def _handle_start(self, icon, item) -> None:
         self._on_start_manual()

@@ -76,6 +76,8 @@ class App:
             on_process_job=self._on_process_job,
             on_quit=self._on_quit,
             on_edit_job=self._on_edit_job,
+            on_delete_job=self._on_delete_job,
+            on_delete_all_pending=self._on_delete_all_pending,
         )
 
         # Native host thread
@@ -335,6 +337,18 @@ class App:
             self._refresh_tray_jobs()
 
         self._root.after(0, show)
+
+    def _on_delete_job(self, job_id: int) -> None:
+        """Удаляет одно необработанное задание из БД."""
+        with get_conn() as conn:
+            conn.execute("DELETE FROM jobs WHERE id=?", (job_id,))
+        self._refresh_tray_jobs()
+
+    def _on_delete_all_pending(self) -> None:
+        """Удаляет все необработанные задания из БД."""
+        with get_conn() as conn:
+            conn.execute("DELETE FROM jobs WHERE status IN ('pending', 'transcribed')")
+        self._refresh_tray_jobs()
 
     def _refresh_tray_jobs(self) -> None:
         with get_conn() as conn:
