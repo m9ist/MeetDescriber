@@ -13,45 +13,10 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import config
+from prompts import FOLLOWUP_SYSTEM_PROMPT as SYSTEM_PROMPT
+from prompts import FOLLOWUP_USER_TEMPLATE as USER_PROMPT_TEMPLATE
 
 log = logging.getLogger(__name__)
-
-SYSTEM_PROMPT = """\
-Ты — бизнес-ассистент. Тебе дан смысловой анализ совещания.
-Сгенерируй структурированный follow-up документ.
-
-Правила:
-- Пиши на русском языке
-- Будь конкретным и лаконичным
-- Задачи формулируй в виде действий (глагол + что сделать)
-- Если ответственный не назван явно — пиши "не назначен"
-- Если срок не назван — пиши "срок не указан"
-"""
-
-USER_PROMPT_TEMPLATE = """\
-## Совещание: {title}
-**Дата:** {date}
-
-## Смысловой анализ
-
-{analysis}
-
----
-
-Сгенерируй follow-up документ со следующими разделами:
-
-### Задачи
-Таблица: | Задача | Ответственный | Срок |
-
-### Следующие шаги
-Нумерованный список конкретных действий в хронологическом порядке.
-
-### Открытые вопросы
-Вопросы, требующие уточнения или ответа до следующей встречи.
-
-### Итоги встречи
-2–3 предложения: что обсудили и к чему пришли.
-"""
 
 
 def _build_prompt(analysis_path: Path, title: str, started_at: str) -> str:
