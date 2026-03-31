@@ -65,6 +65,27 @@ def _build_prompt(analysis_path: Path, title: str, started_at: str) -> str:
     return SYSTEM_PROMPT + "\n\n---\n\n" + user_prompt
 
 
+def _build_chat_prompt(
+    analysis_path: Path,
+    title: str,
+    started_at: str,
+    output_path: Path,
+) -> str:
+    """Версия промпта для вставки в чат — анализ указывается файлом, не инлайн."""
+    date = (started_at or "")[:10]
+    user_prompt = USER_PROMPT_TEMPLATE.format(
+        title=title,
+        date=date,
+        analysis=f"[файл: {analysis_path}]",
+    )
+    return (
+        SYSTEM_PROMPT
+        + "\n\n---\n\n"
+        + user_prompt
+        + f"\n\n---\n\nЗапиши результат в файл:\n{output_path}"
+    )
+
+
 def _call_claude_cli(prompt: str) -> str:
     """Пробует вызвать claude CLI через stdin. Бросает OSError/FileNotFoundError если CLI недоступен."""
     import tempfile
@@ -128,8 +149,8 @@ def write_followup_md(
             raise
         log.warning("CLI недоступен (%s) — показываем диалог ручного запуска", e)
         cli = config._find_claude_cli()
-        result = ask_claude("follow-up", prompt_path, cli,
-                            input_path=analysis_path, output_path=path)
+        chat_prompt = _build_chat_prompt(analysis_path, title, started_at, path)
+        result = ask_claude("follow-up", prompt_path, cli, chat_prompt=chat_prompt)
         if result is None:
             raise RuntimeError("Пользователь отменил генерацию follow-up") from e
         followup_text = result

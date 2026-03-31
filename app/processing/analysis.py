@@ -74,6 +74,30 @@ def _build_prompt(
     return SYSTEM_PROMPT + "\n\n---\n\n" + user_prompt
 
 
+def _build_chat_prompt(
+    transcription_path: Path,
+    title: str,
+    started_at: str,
+    agenda: str,
+    output_path: Path,
+) -> str:
+    """Версия промпта для вставки в чат — расшифровка указывается файлом, не инлайн."""
+    date = (started_at or "")[:10]
+    agenda_block = f"**Агенда:** {agenda.strip()}" if agenda and agenda.strip() else ""
+    user_prompt = USER_PROMPT_TEMPLATE.format(
+        title=title,
+        date=date,
+        agenda_block=agenda_block,
+        transcription=f"[файл: {transcription_path}]",
+    )
+    return (
+        SYSTEM_PROMPT
+        + "\n\n---\n\n"
+        + user_prompt
+        + f"\n\n---\n\nЗапиши результат в файл:\n{output_path}"
+    )
+
+
 def _call_claude_cli(prompt: str) -> str:
     """Пробует вызвать claude CLI через stdin. Бросает OSError/FileNotFoundError если CLI недоступен."""
     import tempfile
@@ -138,8 +162,8 @@ def write_analysis_md(
             raise
         log.warning("CLI недоступен (%s) — показываем диалог ручного запуска", e)
         cli = config._find_claude_cli()
-        result = ask_claude("анализ", prompt_path, cli,
-                            input_path=transcription_path, output_path=path)
+        chat_prompt = _build_chat_prompt(transcription_path, title, started_at, agenda, path)
+        result = ask_claude("анализ", prompt_path, cli, chat_prompt=chat_prompt)
         if result is None:
             raise RuntimeError("Пользователь отменил генерацию анализа") from e
         analysis_text = result

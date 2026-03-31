@@ -252,14 +252,13 @@ class App:
         import queue as _queue
         from app.ui.dialogs import ClaudeManualDialog
 
-        def ask_claude(stage: str, prompt_path, cli: str,
-                       input_path=None, output_path=None):
+        def ask_claude(stage: str, prompt_path, cli: str, chat_prompt: str = ""):
             result_q = _queue.Queue()
             self._root.after(
                 0,
                 lambda: ClaudeManualDialog(
                     self._root, stage, prompt_path, cli, result_q,
-                    input_path=input_path, output_path=output_path,
+                    chat_prompt=chat_prompt,
                 ),
             )
             return result_q.get(timeout=1800)  # 30 мин
