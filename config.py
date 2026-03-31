@@ -92,7 +92,12 @@ def _find_claude_from_processes() -> str:
             if not path or path in seen:
                 continue
             seen.add(path)
-            if path.lower().endswith(".exe") and os.path.isfile(path):
+            if not path.lower().endswith(".exe"):
+                continue
+            # AppData\Roaming недоступен из app-контекста — никогда не используем
+            if "appdata" in path.lower() and "roaming" in path.lower():
+                continue
+            if os.path.isfile(path):
                 return path
     except Exception:
         pass
@@ -108,8 +113,10 @@ def _find_claude_cli() -> str:
     3. PATH (shutil.which) — если claude добавлен в PATH
     4. Фолбек: "claude" (вызов упадёт с понятной ошибкой)
     """
-    if _env := os.getenv("CLAUDE_CLI"):
-        return _env
+    if (_env := os.getenv("CLAUDE_CLI")):
+        _el = _env.lower()
+        if os.path.isfile(_env) and not ("appdata" in _el and "roaming" in _el):
+            return _env
     if sys.platform == "win32":
         _proc = _find_claude_from_processes()
         if _proc:
