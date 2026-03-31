@@ -45,6 +45,7 @@ data/recordings/       # WAV-чанки по сессиям
 - `init_db()` сбрасывает зависшие `processing` → `pending` при старте
 - LLM-промпты сохраняются в `*_analysis_prompt.md` / `*_followup_prompt.md` для ручного перезапуска
 - Когда CLI недоступен — показывается `ClaudeManualDialog` с 3 кнопками: «Запустить», «Скопировать команду», «Скопировать промпт»
+- Путь к `claude.exe` определяется динамически через `wmic process where "name like '%claude%'"` — предполагается, что Claude Desktop запущен в момент перехода на этапы анализа/follow-up. Fallback: `shutil.which`, glob по AppData
 - `sqlite3.Row` → всегда конвертировать в `dict()` перед `.get()`
 
 ## Запуск

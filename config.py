@@ -56,13 +56,54 @@ QUALITY_THRESHOLD = 0.70         # confidence ниже этого → toast-пр
 WHISPER_MODEL = "large-v3"
 WHISPER_LANGUAGE = "ru"
 
-# Claude CLI — путь к исполняемому файлу (или просто "claude" если он в PATH)
+# Claude CLI — путь к исполняемому файлу
+# Стратегия поиска (в порядке приоритета):
+# 1. Переменная окружения CLAUDE_CLI
+# 2. Запущенные процессы — claude должен быть запущен когда нужен (wmic)
+# 3. PATH (shutil.which)
+# 4. Glob по известным путям AppData
 import shutil as _shutil
+import subprocess as _subprocess
+
+
+def _find_claude_from_processes() -> str:
+    """Ищет путь к claude-code CLI через список запущенных процессов (wmic)."""
+    try:
+        r = _subprocess.run(
+            [
+                "wmic", "process",
+                "where", "name like '%claude%'",
+                "get", "ExecutablePath", "/format:list",
+            ],
+            capture_output=True,
+            timeout=10,
+        )
+        output = r.stdout.decode("utf-8", errors="replace")
+        seen = set()
+        for line in output.splitlines():
+            line = line.strip()
+            if not line.lower().startswith("executablepath="):
+                continue
+            path = line[len("executablepath="):].strip()
+            if not path or path in seen:
+                continue
+            seen.add(path)
+            # claude-code CLI: путь содержит claude-code и оканчивается на .exe
+            if "claude-code" in path.lower() and path.lower().endswith(".exe"):
+                return path
+    except Exception:
+        pass
+    return ""
+
 
 def _find_claude_cli() -> str:
     import glob as _glob
     if _env := os.getenv("CLAUDE_CLI"):
         return _env
+    if sys.platform == "win32":
+        _proc = _find_claude_from_processes()
+        if _proc:
+            return _proc
     if _which := _shutil.which("claude"):
         return _which
     if sys.platform == "win32":
@@ -75,8 +116,6 @@ def _find_claude_cli() -> str:
             if _matches:
                 return _matches[0]
     return "claude"
-
-CLAUDE_CLI = _find_claude_cli()
 
 
 def ensure_dirs() -> None:
