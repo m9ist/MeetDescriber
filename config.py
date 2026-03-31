@@ -67,7 +67,13 @@ import subprocess as _subprocess
 
 
 def _find_claude_from_processes() -> str:
-    """Ищет путь к claude-code CLI через список запущенных процессов (wmic)."""
+    """Ищет доступный claude CLI через список запущенных процессов (wmic).
+
+    Собирает уникальные пути всех claude-процессов, проверяет доступность
+    через os.path.isfile() и возвращает лучший кандидат:
+    - предпочитает пути с 'claude-code' (это CLI, а не Desktop-приложение)
+    - среди равных — первый доступный
+    """
     try:
         r = _subprocess.run(
             [
@@ -79,7 +85,9 @@ def _find_claude_from_processes() -> str:
             timeout=10,
         )
         output = r.stdout.decode("utf-8", errors="replace")
-        seen = set()
+        seen: set = set()
+        cli_candidates = []   # пути с 'claude-code' (CLI)
+        other_candidates = [] # остальные claude.exe
         for line in output.splitlines():
             line = line.strip()
             if not line.lower().startswith("executablepath="):
@@ -88,9 +96,19 @@ def _find_claude_from_processes() -> str:
             if not path or path in seen:
                 continue
             seen.add(path)
-            # claude-code CLI: путь содержит claude-code и оканчивается на .exe
-            if "claude-code" in path.lower() and path.lower().endswith(".exe"):
-                return path
+            if not path.lower().endswith(".exe"):
+                continue
+            if not os.path.isfile(path):
+                continue
+            if "claude-code" in path.lower():
+                cli_candidates.append(path)
+            else:
+                other_candidates.append(path)
+        # CLI в приоритете
+        if cli_candidates:
+            return cli_candidates[0]
+        if other_candidates:
+            return other_candidates[0]
     except Exception:
         pass
     return ""
