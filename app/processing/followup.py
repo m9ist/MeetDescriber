@@ -7,8 +7,6 @@
 from __future__ import annotations
 
 import logging
-import os
-import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -51,46 +49,6 @@ def _build_chat_prompt(
     )
 
 
-def _call_claude_cli(prompt: str) -> str:
-    """Пробует вызвать claude CLI через stdin. Бросает OSError/FileNotFoundError если CLI недоступен."""
-    import tempfile
-    cli = config._find_claude_cli()
-    log.info("Запуск claude CLI: %r", cli)
-
-    with tempfile.NamedTemporaryFile(mode="wb", suffix=".txt", delete=False) as f:
-        f.write(prompt.encode("utf-8"))
-        tmp_path = f.name
-
-    try:
-        with open(tmp_path, "rb") as fh:
-            result = subprocess.run(
-                [cli, "-p", "-"],
-                stdin=fh,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=300,
-            )
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-
-    stdout_text = (result.stdout or b"").decode("utf-8", errors="replace")
-    stderr_text = (result.stderr or b"").decode("utf-8", errors="replace")
-    log.info("claude rc=%d stdout=%d chars stderr=%r",
-             result.returncode, len(stdout_text), stderr_text[:200])
-
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"claude CLI завершился с кодом {result.returncode}: {stderr_text[:300]}"
-        )
-    text = stdout_text.strip()
-    if not text:
-        raise RuntimeError("claude CLI вернул пустой ответ")
-    return text
-
-
 def write_followup_md(
     path: Path,
     title: str,
@@ -108,21 +66,17 @@ def write_followup_md(
         prompt_path.write_text(chat_prompt, encoding="utf-8")
         log.info("Промпт follow-up сохранён: %s", prompt_path)
 
-    try:
-        followup_text = _call_claude_cli(prompt)
-    except (FileNotFoundError, OSError, RuntimeError) as e:
-        if ask_claude is None:
-            raise
-        log.warning("CLI недоступен (%s) — показываем диалог ручного запуска", e)
-        cli = config._find_claude_cli()
-        result = ask_claude("follow-up", prompt_path, cli,
-                            chat_prompt=chat_prompt, output_path=path)
-        if result is None:
-            raise RuntimeError("Пользователь отменил генерацию follow-up") from e
-        if result == "__STAGE_DONE__":
-            log.info("Follow-up: файл записан вручную, пропускаем запись → %s", path)
-            return path
-        followup_text = result
+    if ask_claude is None:
+        raise RuntimeError("ask_claude не передан — ручной запуск невозможен")
+    cli = config._find_claude_cli()
+    result = ask_claude("follow-up", prompt_path, cli,
+                        chat_prompt=chat_prompt, output_path=path)
+    if result is None:
+        raise RuntimeError("Пользователь отменил генерацию follow-up")
+    if result == "__STAGE_DONE__":
+        log.info("Follow-up: файл записан вручную, пропускаем запись → %s", path)
+        return path
+    followup_text = result
 
     date = (started_at or "")[:10]
     header = f"# Follow-up: {title or 'Встреча'}\n\n**Дата:** {date}\n\n---\n\n"

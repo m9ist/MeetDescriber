@@ -294,11 +294,13 @@ class ClaudeManualDialog:
                 try:
                     with open(tmp, "rb") as fh:
                         r = subprocess.run(
-                            [self._cli, "-p", "-"],
+                            [self._cli, "-p", "-",
+                             "--allowedTools", "Write", "Edit"],
                             stdin=fh,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
                             timeout=300,
+                            cwd=str(config.ROOT_DIR),
                         )
                 finally:
                     try:
@@ -328,7 +330,11 @@ class ClaudeManualDialog:
         # Путь в формате Unix-слешей для bash/Git Bash
         prompt_unix = str(self._prompt_path).replace("\\", "/")
         cli_unix = self._cli.replace("\\", "/")
-        cmd = f'"{cli_unix}" -p - < "{prompt_unix}"'
+        root_unix = str(config.ROOT_DIR).replace("\\", "/")
+        cmd = (
+            f'cd "{root_unix}" && '
+            f'"{cli_unix}" -p - --allowedTools Write Edit < "{prompt_unix}"'
+        )
         self._win.clipboard_clear()
         self._win.clipboard_append(cmd)
         self._set_status("Команда скопирована в буфер обмена")
