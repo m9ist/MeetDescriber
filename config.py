@@ -67,12 +67,10 @@ import subprocess as _subprocess
 
 
 def _find_claude_from_processes() -> str:
-    """Ищет доступный claude CLI через список запущенных процессов (wmic).
+    """Ищет доступный claude.exe через список запущенных процессов (wmic).
 
-    Собирает уникальные пути всех claude-процессов, проверяет доступность
-    через os.path.isfile() и возвращает лучший кандидат:
-    - предпочитает пути с 'claude-code' (это CLI, а не Desktop-приложение)
-    - среди равных — первый доступный
+    Собирает уникальные пути всех claude-процессов и возвращает первый,
+    для которого os.path.isfile() возвращает True (доступен из текущего процесса).
     """
     try:
         r = _subprocess.run(
@@ -86,8 +84,6 @@ def _find_claude_from_processes() -> str:
         )
         output = r.stdout.decode("utf-8", errors="replace")
         seen: set = set()
-        cli_candidates = []   # пути с 'claude-code' (CLI)
-        other_candidates = [] # остальные claude.exe
         for line in output.splitlines():
             line = line.strip()
             if not line.lower().startswith("executablepath="):
@@ -96,26 +92,22 @@ def _find_claude_from_processes() -> str:
             if not path or path in seen:
                 continue
             seen.add(path)
-            if not path.lower().endswith(".exe"):
-                continue
-            if not os.path.isfile(path):
-                continue
-            if "claude-code" in path.lower():
-                cli_candidates.append(path)
-            else:
-                other_candidates.append(path)
-        # CLI в приоритете
-        if cli_candidates:
-            return cli_candidates[0]
-        if other_candidates:
-            return other_candidates[0]
+            if path.lower().endswith(".exe") and os.path.isfile(path):
+                return path
     except Exception:
         pass
     return ""
 
 
 def _find_claude_cli() -> str:
-    import glob as _glob
+    """Возвращает путь к claude CLI.
+
+    Приоритет:
+    1. Переменная окружения CLAUDE_CLI (явный override)
+    2. Живые процессы через wmic — берём первый доступный claude.exe
+    3. PATH (shutil.which) — если claude добавлен в PATH
+    4. Фолбек: "claude" (вызов упадёт с понятной ошибкой)
+    """
     if _env := os.getenv("CLAUDE_CLI"):
         return _env
     if sys.platform == "win32":
@@ -124,15 +116,6 @@ def _find_claude_cli() -> str:
             return _proc
     if _which := _shutil.which("claude"):
         return _which
-    if sys.platform == "win32":
-        _home = str(Path.home())
-        for _pattern in [
-            _home + r"\AppData\Roaming\Claude\claude-code\*\claude.exe",
-            _home + r"\AppData\Local\Claude\claude-code\*\claude.exe",
-        ]:
-            _matches = sorted(_glob.glob(_pattern), reverse=True)
-            if _matches:
-                return _matches[0]
     return "claude"
 
 
