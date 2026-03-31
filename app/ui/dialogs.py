@@ -318,13 +318,17 @@ class ClaudeManualDialog:
         if self._prompt_path is None:
             self._set_status("Промпт не найден", error=True)
             return
-        try:
-            text = self._prompt_path.read_text(encoding="utf-8")
-        except Exception as e:
-            self._set_status(f"Не удалось прочитать промпт: {e}", error=True)
-            return
+        # Выводной файл: убираем _prompt из имени (_analysis_prompt.md → _analysis.md)
+        out_path = Path(str(self._prompt_path).replace("_prompt.md", ".md"))
+        text = (
+            f"Прочитай промпт из файла:\n"
+            f"{self._prompt_path}\n\n"
+            f"Выполни задание из этого промпта и запиши результат в файл:\n"
+            f"{out_path}"
+        )
         self._win.clipboard_clear()
         self._win.clipboard_append(text)
+        self._set_status("Промпт скопирован в буфер обмена")
         self._set_status("Промпт скопирован в буфер обмена")
 
     def _on_skip(self) -> None:
