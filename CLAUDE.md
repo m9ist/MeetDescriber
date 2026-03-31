@@ -50,8 +50,12 @@ data/recordings/       # WAV-чанки по сессиям
 
 ## Запуск
 ```bash
+# Из терминала
 python -m app.main
 # логи: Get-Content app.log -Wait
+
+# Из Windows (без CMD-окна) — двойной клик
+start_windows.vbs
 ```
 
 ## Бэклог (BACKLOG.md)
