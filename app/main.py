@@ -41,7 +41,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("app")
 
-from app.storage.db import init_db, get_conn
+from app.storage.db import init_db, get_conn, update_session, update_job_paths
+from app.storage.file_manager import rename_session_docs
 from app.capture.audio_capture import AudioCapture, list_audio_sources
 from app.extension.native_host import NativeHost, read_message, send_message
 from app.ui import notifications, tray as tray_module, dialogs
@@ -74,6 +75,7 @@ class App:
             on_stop=self._on_stop_manual,
             on_process_job=self._on_process_job,
             on_quit=self._on_quit,
+            on_edit_job=self._on_edit_job,
         )
 
         # Native host thread
@@ -295,6 +297,45 @@ class App:
 
         threading.Thread(target=run, daemon=True, name=f"pipeline-{job_id}").start()
 
+    def _on_edit_job(self, job_id: int) -> None:
+        """Открывает диалог редактирования названия/агенды совещания."""
+        def show():
+            with get_conn() as conn:
+                row = conn.execute(
+                    """SELECT s.id, s.title, s.agenda, s.started_at
+                       FROM jobs j JOIN sessions s ON s.id = j.session_id
+                       WHERE j.id=?""",
+                    (job_id,),
+                ).fetchone()
+            if not row:
+                return
+            session_id = row["id"]
+            old_title = row["title"] or ""
+            old_agenda = row["agenda"] or ""
+            started_at = row["started_at"]
+
+            from app.ui.dialogs import ask_edit_meeting_info
+            result = ask_edit_meeting_info(
+                self._root,
+                title=old_title,
+                agenda=old_agenda,
+            )
+            if result is None:
+                return
+
+            new_title = result["title"]
+            new_agenda = result["agenda"]
+
+            # Переименовываем файлы если изменилось название
+            if new_title != old_title and new_title:
+                new_paths = rename_session_docs(session_id, old_title, new_title, started_at)
+                update_job_paths(session_id, new_paths)
+
+            update_session(session_id, new_title or old_title, new_agenda)
+            self._refresh_tray_jobs()
+
+        self._root.after(0, show)
+
     def _refresh_tray_jobs(self) -> None:
         with get_conn() as conn:
             pending_rows = conn.execute("""
@@ -305,17 +346,33 @@ class App:
             """).fetchall()
 
             done_rows = conn.execute("""
-                SELECT j.id, j.status, s.title, s.started_at
+                SELECT j.id, j.status, j.session_id, j.transcription_path, j.analysis_path, j.followup_path,
+                       s.title, s.started_at
                 FROM jobs j JOIN sessions s ON s.id = j.session_id
                 WHERE j.status = 'done'
                 ORDER BY j.updated_at DESC
                 LIMIT 20
             """).fetchall()
 
-        to_dict = lambda r: {"id": r["id"], "status": r["status"], "title": r["title"], "started_at": r["started_at"]}
+        pending_to_dict = lambda r: {
+            "id": r["id"],
+            "status": r["status"],
+            "title": r["title"],
+            "started_at": r["started_at"],
+        }
+        done_to_dict = lambda r: {
+            "id": r["id"],
+            "status": r["status"],
+            "title": r["title"],
+            "started_at": r["started_at"],
+            "session_id": r["session_id"],
+            "transcription_path": r["transcription_path"],
+            "analysis_path": r["analysis_path"],
+            "followup_path": r["followup_path"],
+        }
         self._tray.set_jobs(
-            pending=[to_dict(r) for r in pending_rows],
-            done=[to_dict(r) for r in done_rows],
+            pending=[pending_to_dict(r) for r in pending_rows],
+            done=[done_to_dict(r) for r in done_rows],
         )
 
     # ── Выход ─────────────────────────────────────────────────────────────────

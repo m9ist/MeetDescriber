@@ -71,3 +71,31 @@ def init_db() -> None:
 
 def db_exists() -> bool:
     return Path(config.DB_PATH).exists()
+
+
+def update_session(session_id: int, title: str, agenda: str) -> None:
+    """Обновляет название и агенду сессии."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE sessions SET title=?, agenda=? WHERE id=?",
+            (title, agenda, session_id),
+        )
+
+
+def update_job_paths(session_id: int, paths: dict) -> None:
+    """Обновляет пути к файлам задания после переименования."""
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE jobs SET
+               transcription_path=COALESCE(?, transcription_path),
+               analysis_path=COALESCE(?, analysis_path),
+               followup_path=COALESCE(?, followup_path),
+               updated_at=datetime('now')
+               WHERE session_id=?""",
+            (
+                paths.get("transcription"),
+                paths.get("analysis"),
+                paths.get("followup"),
+                session_id,
+            ),
+        )

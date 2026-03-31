@@ -361,6 +361,86 @@ class ClaudeManualDialog:
         self._status_lbl.config(fg="#c0392b" if error else "#2d6a2d")
 
 
+class MeetingEditDialog:
+    """
+    Диалог редактирования информации о совещании.
+    Поля: название, агенда. При смене названия — файлы переименовываются.
+    """
+
+    def __init__(
+        self,
+        parent: tk.Tk,
+        title: str = "",
+        agenda: str = "",
+    ) -> None:
+        self.ok = False
+        self.title_value = title
+        self.agenda_value = agenda
+
+        win = tk.Toplevel(parent)
+        win.title("Информация о совещании")
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        win.grab_set()
+        self._win = win
+
+        pad = {"padx": 12, "pady": 4}
+
+        tk.Label(win, text="Название совещания:", anchor="w").pack(fill="x", **pad)
+        self._title_var = tk.StringVar(value=title)
+        tk.Entry(win, textvariable=self._title_var, width=45).pack(fill="x", **pad)
+
+        tk.Label(win, text="Агенда (необязательно):", anchor="w").pack(fill="x", **pad)
+        self._agenda_text = scrolledtext.ScrolledText(win, height=4, width=45)
+        self._agenda_text.pack(fill="x", **pad)
+        if agenda:
+            self._agenda_text.insert("1.0", agenda)
+
+        btn_frame = tk.Frame(win)
+        btn_frame.pack(fill="x", padx=12, pady=(8, 12))
+
+        tk.Button(
+            btn_frame, text="Сохранить",
+            command=self._on_ok,
+            bg="#2d6a2d", fg="white",
+            relief="flat", padx=14, pady=6,
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="right", padx=(6, 0))
+
+        tk.Button(
+            btn_frame, text="Отмена",
+            command=win.destroy,
+            relief="flat", padx=10, pady=6,
+        ).pack(side="right")
+
+        win.update_idletasks()
+        sw = parent.winfo_screenwidth()
+        sh = parent.winfo_screenheight()
+        w = win.winfo_width()
+        h = win.winfo_height()
+        win.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
+
+        parent.wait_window(win)
+
+    def _on_ok(self) -> None:
+        self.ok = True
+        self.title_value = self._title_var.get().strip()
+        self.agenda_value = self._agenda_text.get("1.0", "end").strip()
+        self._win.destroy()
+
+
+def ask_edit_meeting_info(
+    parent: tk.Tk,
+    title: str = "",
+    agenda: str = "",
+) -> Optional[dict]:
+    """Показывает диалог редактирования и возвращает dict или None если отменено."""
+    d = MeetingEditDialog(parent, title=title, agenda=agenda)
+    if not d.ok:
+        return None
+    return {"title": d.title_value, "agenda": d.agenda_value}
+
+
 def ask_meeting_info(
     parent: tk.Tk,
     default_title: str = "",

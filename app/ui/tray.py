@@ -13,6 +13,7 @@
   - Выход
 """
 import threading
+from pathlib import Path
 from typing import Callable, Optional
 
 import pystray
@@ -51,11 +52,13 @@ class ForMeetsTray:
         on_stop: Callable[[], None],
         on_process_job: Callable[[int], None],
         on_quit: Callable[[], None],
+        on_edit_job: Callable[[int], None] = None,
     ) -> None:
         self._on_start_manual = on_start_manual
         self._on_stop = on_stop
         self._on_process_job = on_process_job
         self._on_quit = on_quit
+        self._on_edit_job = on_edit_job
 
         self._recording = False
         self._status_text = "Ожидание"
@@ -137,9 +140,9 @@ class ForMeetsTray:
             done_items = [
                 pystray.MenuItem(
                     self._job_label(j),
-                    self._make_job_handler(j["id"]),
+                    self._make_done_submenu(j),
                 )
-                for j in self._done_jobs[-10:]  # последние 10
+                for j in self._done_jobs[-10:]
             ]
             items.append(pystray.MenuItem(
                 f"Обработанные ({len(self._done_jobs)})",
@@ -168,6 +171,53 @@ class ForMeetsTray:
         label_dt = f"{date} {time}" if time else date
         suffix = " → анализ" if job.get("status") == "transcribed" else ""
         return f"{label_dt}  {title}{suffix}"
+
+    def _make_done_submenu(self, job: dict) -> pystray.Menu:
+        import os
+
+        def open_folder(icon, item):
+            # Ищем первый существующий файл, открываем его папку
+            for key in ("transcription_path", "analysis_path", "followup_path"):
+                p = job.get(key)
+                if p and Path(p).exists():
+                    os.startfile(str(Path(p).parent))
+                    return
+
+        def make_open_file(path_str):
+            def handler(icon, item):
+                if path_str and Path(path_str).exists():
+                    os.startfile(path_str)
+            return handler
+
+        def edit_info(icon, item):
+            if self._on_edit_job:
+                self._on_edit_job(job["id"])
+
+        tr = job.get("transcription_path")
+        an = job.get("analysis_path")
+        fu = job.get("followup_path")
+
+        return pystray.Menu(
+            pystray.MenuItem("Открыть расположение", open_folder),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(
+                "Транскрипция",
+                make_open_file(tr),
+                enabled=bool(tr and Path(tr).exists()),
+            ),
+            pystray.MenuItem(
+                "Анализ",
+                make_open_file(an),
+                enabled=bool(an and Path(an).exists()),
+            ),
+            pystray.MenuItem(
+                "Follow-up",
+                make_open_file(fu),
+                enabled=bool(fu and Path(fu).exists()),
+            ),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Информация о совещании", edit_info),
+        )
 
     def _make_job_handler(self, job_id: int) -> Callable:
         def handler(icon, item):

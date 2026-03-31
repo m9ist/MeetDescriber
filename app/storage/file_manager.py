@@ -43,6 +43,24 @@ def get_doc_paths(title: str, started_at: str) -> dict[str, Path]:
     }
 
 
+def rename_session_docs(session_id: int, old_title: str, new_title: str, started_at: str) -> dict[str, str]:
+    """
+    Переименовывает все документы сессии при смене названия.
+    Возвращает новые пути (только для существующих файлов).
+    """
+    old_paths = get_doc_paths(old_title, started_at)
+    new_paths = get_doc_paths(new_title, started_at)
+    result = {}
+    for key in ("transcription", "analysis", "analysis_prompt", "followup", "followup_prompt"):
+        old = old_paths[key]
+        new = new_paths[key]
+        if old.exists() and old != new:
+            old.rename(new)
+        if new.exists():
+            result[key] = str(new)
+    return result
+
+
 # ── Конкатенация чанков ───────────────────────────────────────────────────────
 
 def merge_chunks(session_dir: Path) -> Optional[Path]:
