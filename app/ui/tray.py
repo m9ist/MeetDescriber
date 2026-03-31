@@ -22,16 +22,27 @@ from PIL import Image, ImageDraw
 
 def _make_icon(recording: bool = False) -> Image.Image:
     """Рисует простую иконку 64x64."""
-    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    import math
+    S = 64
+    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    color = "#e84040" if recording else "#4a90d9"
-    draw.ellipse([8, 8, 56, 56], fill=color)
+
     if recording:
-        # Квадрат = стоп
+        # Красный круг + белый квадрат (стоп)
+        draw.ellipse([2, 2, 61, 61], fill="#e84040")
         draw.rectangle([22, 22, 42, 42], fill="white")
     else:
-        # Треугольник = готов
-        draw.polygon([(24, 18), (24, 46), (48, 32)], fill="white")
+        # Тёмно-синий круг + синусоида + красная точка записи (ожидание)
+        draw.ellipse([2, 2, 61, 61], fill="#1a1a2e")
+        pts = []
+        for px in range(8, 57):
+            t = (px - 8) / (56 - 8) * 2 * math.pi * 2.5
+            py = int(32 + math.sin(t) * 14 * (1 - abs(px - 32) / 32))
+            pts.append((px, py))
+        for i in range(len(pts) - 1):
+            draw.line([pts[i], pts[i + 1]], fill="#26c6da", width=2)
+        draw.ellipse([27, 27, 37, 37], fill="#ef5350", outline="#ffffff", width=1)
+
     return img
 
 
