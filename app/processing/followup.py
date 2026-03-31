@@ -115,9 +115,13 @@ def write_followup_md(
         log.warning("CLI недоступен (%s) — показываем диалог ручного запуска", e)
         cli = config._find_claude_cli()
         chat_prompt = _build_chat_prompt(analysis_path, title, started_at, path)
-        result = ask_claude("follow-up", prompt_path, cli, chat_prompt=chat_prompt)
+        result = ask_claude("follow-up", prompt_path, cli,
+                            chat_prompt=chat_prompt, output_path=path)
         if result is None:
             raise RuntimeError("Пользователь отменил генерацию follow-up") from e
+        if result == "__STAGE_DONE__":
+            log.info("Follow-up: файл записан вручную, пропускаем запись → %s", path)
+            return path
         followup_text = result
 
     date = (started_at or "")[:10]

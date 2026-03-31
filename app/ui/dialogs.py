@@ -171,6 +171,9 @@ class ClaudeManualDialog:
     result_queue получает str (текст результата) или None (пользователь пропустил).
     """
 
+    # Sentinel: файл записан вручную, pipeline пропускает запись
+    STAGE_DONE = "__STAGE_DONE__"
+
     def __init__(
         self,
         parent: tk.Tk,
@@ -179,11 +182,13 @@ class ClaudeManualDialog:
         cli: str,
         result_queue: queue.Queue,
         chat_prompt: str = "",
+        output_path: Optional[Path] = None,
     ) -> None:
         self._prompt_path = prompt_path
         self._cli = cli
         self._queue = result_queue
-        self._chat_prompt = chat_prompt  # готовый промпт для вставки в чат
+        self._chat_prompt = chat_prompt
+        self._output_path = output_path
 
         win = tk.Toplevel(parent)
         win.title(f"Claude CLI недоступен — {stage}")
@@ -245,14 +250,26 @@ class ClaudeManualDialog:
             relief="flat", padx=10, pady=6,
         ).pack(side="left")
 
-        # Кнопка закрыть
+        # Кнопка "Этап выполнен" + "Пропустить"
+        bottom_frame = tk.Frame(win)
+        bottom_frame.pack(fill="x", padx=14, pady=(0, 12))
+
         tk.Button(
-            win,
+            bottom_frame,
+            text="Этап выполнен",
+            command=self._on_stage_done,
+            relief="flat", padx=10, pady=5,
+            bg="#1a5276", fg="white",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left")
+
+        tk.Button(
+            bottom_frame,
             text="Пропустить этот этап",
             command=self._on_skip,
-            relief="flat", padx=10, pady=4,
+            relief="flat", padx=10, pady=5,
             fg="#888",
-        ).pack(anchor="e", padx=14, pady=(0, 12))
+        ).pack(side="right")
 
         # Центрируем
         win.update_idletasks()
@@ -324,6 +341,16 @@ class ClaudeManualDialog:
         self._win.clipboard_append(self._chat_prompt)
         self._set_status("Промпт скопирован в буфер обмена")
         self._set_status("Промпт скопирован в буфер обмена")
+
+    def _on_stage_done(self) -> None:
+        if self._output_path is None:
+            self._set_status("Путь к выходному файлу не задан", error=True)
+            return
+        if not self._output_path.exists():
+            self._set_status(f"Файл не найден: {self._output_path}", error=True)
+            return
+        self._queue.put(self.STAGE_DONE)
+        self._win.destroy()
 
     def _on_skip(self) -> None:
         self._queue.put(None)

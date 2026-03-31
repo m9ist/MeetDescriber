@@ -126,9 +126,13 @@ def write_analysis_md(
         log.warning("CLI недоступен (%s) — показываем диалог ручного запуска", e)
         cli = config._find_claude_cli()
         chat_prompt = _build_chat_prompt(transcription_path, title, started_at, agenda, path)
-        result = ask_claude("анализ", prompt_path, cli, chat_prompt=chat_prompt)
+        result = ask_claude("анализ", prompt_path, cli,
+                            chat_prompt=chat_prompt, output_path=path)
         if result is None:
             raise RuntimeError("Пользователь отменил генерацию анализа") from e
+        if result == "__STAGE_DONE__":
+            log.info("Анализ: файл записан вручную, пропускаем запись → %s", path)
+            return path
         analysis_text = result
 
     date = (started_at or "")[:10]
