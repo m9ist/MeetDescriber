@@ -28,7 +28,7 @@
 
 - Python 3.10+
 - NVIDIA GPU (для транскрипции)
-- [Claude Code](https://claude.ai/code) авторизован и в PATH (или автообнаружение из `%APPDATA%\Claude\claude-code\`)
+- [Claude Code](https://code.claude.com/docs/en/overview) установлен и авторизован; путь к `claude.exe` задаётся через `CLAUDE_CLI` в `.env`
 - HuggingFace токен с доступом к gated-репозиториям pyannote
 - Chrome с установленным расширением (для автодетекта Meet)
 

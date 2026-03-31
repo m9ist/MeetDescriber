@@ -112,10 +112,11 @@ def write_analysis_md(
 ) -> Path:
     """Генерирует _analysis.md. Сохраняет промпт рядом. Возвращает путь."""
     prompt = _build_prompt(transcription_path, title, started_at, agenda)
+    chat_prompt = _build_chat_prompt(transcription_path, title, started_at, agenda, path)
 
     if prompt_path:
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
-        prompt_path.write_text(prompt, encoding="utf-8")
+        prompt_path.write_text(chat_prompt, encoding="utf-8")
         log.info("Промпт анализа сохранён: %s", prompt_path)
 
     try:
@@ -125,7 +126,6 @@ def write_analysis_md(
             raise
         log.warning("CLI недоступен (%s) — показываем диалог ручного запуска", e)
         cli = config._find_claude_cli()
-        chat_prompt = _build_chat_prompt(transcription_path, title, started_at, agenda, path)
         result = ask_claude("анализ", prompt_path, cli,
                             chat_prompt=chat_prompt, output_path=path)
         if result is None:

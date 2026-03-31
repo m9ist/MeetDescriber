@@ -57,70 +57,22 @@ WHISPER_MODEL = "large-v3"
 WHISPER_LANGUAGE = "ru"
 
 # Claude CLI — путь к исполняемому файлу
-# Стратегия поиска (в порядке приоритета):
-# 1. Переменная окружения CLAUDE_CLI
-# 2. Запущенные процессы — claude должен быть запущен когда нужен (wmic)
-# 3. PATH (shutil.which)
-# 4. Glob по известным путям AppData
+# Задаётся через CLAUDE_CLI в .env (например C:/Users/Oleg/.local/bin/claude.exe).
+# Фолбек: PATH, затем "claude".
 import shutil as _shutil
-import subprocess as _subprocess
-
-
-def _find_claude_from_processes() -> str:
-    """Ищет доступный claude.exe через список запущенных процессов (wmic).
-
-    Собирает уникальные пути всех claude-процессов и возвращает первый,
-    для которого os.path.isfile() возвращает True (доступен из текущего процесса).
-    """
-    try:
-        r = _subprocess.run(
-            [
-                "wmic", "process",
-                "where", "name like '%claude%'",
-                "get", "ExecutablePath", "/format:list",
-            ],
-            capture_output=True,
-            timeout=10,
-        )
-        output = r.stdout.decode("utf-8", errors="replace")
-        seen: set = set()
-        for line in output.splitlines():
-            line = line.strip()
-            if not line.lower().startswith("executablepath="):
-                continue
-            path = line[len("executablepath="):].strip()
-            if not path or path in seen:
-                continue
-            seen.add(path)
-            if not path.lower().endswith(".exe"):
-                continue
-            # AppData\Roaming недоступен из app-контекста — никогда не используем
-            if "appdata" in path.lower() and "roaming" in path.lower():
-                continue
-            if os.path.isfile(path):
-                return path
-    except Exception:
-        pass
-    return ""
 
 
 def _find_claude_cli() -> str:
     """Возвращает путь к claude CLI.
 
     Приоритет:
-    1. Переменная окружения CLAUDE_CLI (явный override)
-    2. Живые процессы через wmic — берём первый доступный claude.exe
-    3. PATH (shutil.which) — если claude добавлен в PATH
-    4. Фолбек: "claude" (вызов упадёт с понятной ошибкой)
+    1. CLAUDE_CLI в .env — явный путь к claude.exe
+    2. PATH (shutil.which)
+    3. Фолбек: "claude"
     """
-    if (_env := os.getenv("CLAUDE_CLI")):
-        _el = _env.lower()
-        if os.path.isfile(_env) and not ("appdata" in _el and "roaming" in _el):
+    if _env := os.getenv("CLAUDE_CLI"):
+        if os.path.isfile(_env):
             return _env
-    if sys.platform == "win32":
-        _proc = _find_claude_from_processes()
-        if _proc:
-            return _proc
     if _which := _shutil.which("claude"):
         return _which
     return "claude"
