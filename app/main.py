@@ -338,16 +338,66 @@ class App:
 
         self._root.after(0, show)
 
+    def _delete_job_files(self, conn, job_id: int) -> None:
+        """Удаляет файлы задания с диска и записи из БД (job + session)."""
+        import shutil
+        from app.storage.file_manager import get_doc_paths
+
+        row = conn.execute(
+            """SELECT j.session_id, j.transcription_path, j.analysis_path, j.followup_path,
+                      s.title, s.started_at
+               FROM jobs j JOIN sessions s ON s.id = j.session_id
+               WHERE j.id=?""",
+            (job_id,),
+        ).fetchone()
+        if not row:
+            return
+
+        # Удаляем документы из jobs-таблицы
+        for col in ("transcription_path", "analysis_path", "followup_path"):
+            p = row[col]
+            if p:
+                try:
+                    Path(p).unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+        # Удаляем промпт-файлы (их нет в jobs, выводим из get_doc_paths)
+        for key in ("analysis_prompt", "followup_prompt"):
+            p = get_doc_paths(row["title"], row["started_at"]).get(key)
+            if p:
+                try:
+                    p.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+        # Удаляем папку с аудиочанками
+        session_dir = config.RECORDINGS_DIR / f"session_{row['session_id']}"
+        if session_dir.exists():
+            try:
+                shutil.rmtree(session_dir)
+            except OSError:
+                pass
+
+        conn.execute("DELETE FROM jobs WHERE id=?", (job_id,))
+        conn.execute("DELETE FROM sessions WHERE id=?", (row["session_id"],))
+
     def _on_delete_job(self, job_id: int) -> None:
-        """Удаляет одно необработанное задание из БД."""
+        """Удаляет необработанное задание и все его файлы."""
         with get_conn() as conn:
-            conn.execute("DELETE FROM jobs WHERE id=?", (job_id,))
+            self._delete_job_files(conn, job_id)
         self._refresh_tray_jobs()
 
     def _on_delete_all_pending(self) -> None:
-        """Удаляет все необработанные задания из БД."""
+        """Удаляет все необработанные задания и их файлы."""
         with get_conn() as conn:
-            conn.execute("DELETE FROM jobs WHERE status IN ('pending', 'transcribed')")
+            job_ids = [
+                r["id"] for r in conn.execute(
+                    "SELECT id FROM jobs WHERE status IN ('pending', 'transcribed')"
+                ).fetchall()
+            ]
+            for job_id in job_ids:
+                self._delete_job_files(conn, job_id)
         self._refresh_tray_jobs()
 
     def _refresh_tray_jobs(self) -> None:
