@@ -5,14 +5,14 @@ Desktop-приложение для Windows (Python + tkinter) которое:
 - записывает аудио с системного loopback (WASAPI) или микрофона во время Google Meet
 - автоматически стартует/останавливает запись через Chrome Extension (Native Messaging)
 - транскрибирует через faster-whisper (CUDA/CPU), диаризует через pyannote.audio (CPU)
-- генерирует три документа: транскрипцию, смысловой анализ, follow-up через `claude -p`
+- генерирует три документа: транскрипцию, смысловой анализ, follow-up через Claude Code CLI
 - показывает всё через tray-иконку + tkinter диалоги
 
 ## Стек
 - Python 3.10, tkinter, pystray, Pillow
 - faster-whisper (whisper-large-v3, CUDA), pyannote.audio 3.x (CPU)
 - SQLite (app/storage/db.py), WAV-чанки по 30 сек
-- LLM: `claude -p "prompt"` subprocess (Claude.ai subscription, не API credits)
+- LLM: Claude Code CLI subprocess с флагами `-p - --allowedTools Write Edit`, `cwd` = корень проекта
 - **Anthropic API намеренно не используется**: корпоративные Google Workspace аккаунты не разрешают подключать сторонние OAuth/API приложения. Используем только CLI.
 
 ## Структура
@@ -44,7 +44,7 @@ data/recordings/       # WAV-чанки по сессиям
 - pipeline идемпотентен: каждый этап проверяет наличие файла перед запуском
 - `init_db()` сбрасывает зависшие `processing` → `pending` при старте
 - LLM-промпты сохраняются в `*_analysis_prompt.md` / `*_followup_prompt.md` для ручного перезапуска
-- Когда CLI недоступен — показывается `ClaudeManualDialog` с 3 кнопками: «Запустить», «Скопировать команду», «Скопировать промпт»
+- `ClaudeManualDialog` показывается **всегда** на этапах анализа и follow-up (не как fallback, а основной путь). Кнопки: «Запустить» (subprocess с `--allowedTools Write Edit`), «Скопировать команду», «Скопировать промпт», «Этап выполнен», «Пропустить»
 - Путь к `claude.exe` определяется динамически через `wmic process where "name like '%claude%'"` — предполагается, что Claude Desktop запущен в момент перехода на этапы анализа/follow-up. Fallback: `shutil.which`, glob по AppData
 - `sqlite3.Row` → всегда конвертировать в `dict()` перед `.get()`
 
