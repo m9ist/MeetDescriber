@@ -144,6 +144,7 @@ def _save_speakers(session_id: int, speaker_map: dict[str, str]) -> None:
 def run_transcription(
     job_id: int,
     on_progress: Optional[Callable[[str, str], None]] = None,
+    ask_claude: Optional[Callable] = None,
 ) -> Optional[Path]:
     """
     Запускает полный пайплайн Этапа 4 для задания job_id.
@@ -241,6 +242,7 @@ def run_transcription(
             agenda=agenda,
             transcription_path=doc_paths["transcription"],
             prompt_path=doc_paths["analysis_prompt"],
+            ask_claude=ask_claude,
         )
         with get_conn() as conn:
             conn.execute(
@@ -260,6 +262,7 @@ def run_transcription(
             started_at=started_at,
             analysis_path=doc_paths["analysis"],
             prompt_path=doc_paths["followup_prompt"],
+            ask_claude=ask_claude,
         )
         with get_conn() as conn:
             conn.execute(

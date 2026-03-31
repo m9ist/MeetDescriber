@@ -33,7 +33,11 @@ DB_PATH = DATA_DIR / "meets.db"
 load_dotenv(ROOT_DIR / ".env", override=True)
 
 HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
+# Anthropic API намеренно не используется: корпоративные Google-аккаунты
+# не позволяют подключать сторонние приложения через API.
+# LLM вызывается через claude CLI (claude -p), который работает через
+# подписку Claude.ai.
 
 # faster-whisper и huggingface_hub читают HF_TOKEN из окружения напрямую
 if HUGGINGFACE_TOKEN and not os.getenv("HF_TOKEN"):
@@ -56,18 +60,20 @@ WHISPER_LANGUAGE = "ru"
 import shutil as _shutil
 
 def _find_claude_cli() -> str:
+    import glob as _glob
     if _env := os.getenv("CLAUDE_CLI"):
         return _env
     if _which := _shutil.which("claude"):
         return _which
     if sys.platform == "win32":
-        _base = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude-code"
-        if _base.is_dir():
-            _versions = sorted(_base.iterdir(), reverse=True)
-            for _v in _versions:
-                _exe = _v / "claude.exe"
-                if _exe.is_file():
-                    return str(_exe)
+        _home = str(Path.home())
+        for _pattern in [
+            _home + r"\AppData\Roaming\Claude\claude-code\*\claude.exe",
+            _home + r"\AppData\Local\Claude\claude-code\*\claude.exe",
+        ]:
+            _matches = sorted(_glob.glob(_pattern), reverse=True)
+            if _matches:
+                return _matches[0]
     return "claude"
 
 CLAUDE_CLI = _find_claude_cli()

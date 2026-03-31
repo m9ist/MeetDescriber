@@ -247,6 +247,21 @@ class App:
 
     # ── Задания ───────────────────────────────────────────────────────────────
 
+    def _make_ask_claude(self) -> "Callable":
+        """Возвращает callback для диалога ручного запуска Claude."""
+        import queue as _queue
+        from app.ui.dialogs import ClaudeManualDialog
+
+        def ask_claude(stage: str, prompt_path, cli: str):
+            result_q = _queue.Queue()
+            self._root.after(
+                0,
+                lambda: ClaudeManualDialog(self._root, stage, prompt_path, cli, result_q),
+            )
+            return result_q.get(timeout=1800)  # 30 мин
+
+        return ask_claude
+
     def _on_process_job(self, job_id: int) -> None:
         """Запускает пайплайн транскрипции в фоновом потоке."""
         import threading
@@ -261,10 +276,11 @@ class App:
 
         modal = ProcessingStatusWindow(self._root, title)
         modal.show()
+        ask_claude = self._make_ask_claude()
 
         def run():
             try:
-                path = run_transcription(job_id, on_progress=modal.update)
+                path = run_transcription(job_id, on_progress=modal.update, ask_claude=ask_claude)
                 log.info("job %d done → %s", job_id, path)
             except Exception as e:
                 log.error("job %d error: %s", job_id, e, exc_info=True)

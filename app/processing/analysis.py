@@ -10,7 +10,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import config
 
@@ -74,62 +74,36 @@ def _build_prompt(
     return SYSTEM_PROMPT + "\n\n---\n\n" + user_prompt
 
 
-def _call_claude(prompt: str) -> str:
-    """Вызывает claude -p, передавая промпт через временный файл и pipe cmd.exe."""
+def _call_claude_cli(prompt: str) -> str:
+    """Пробует вызвать claude CLI через stdin. Бросает OSError/FileNotFoundError если CLI недоступен."""
     import tempfile
     cli = config._find_claude_cli()
     log.info("Запуск claude CLI: %r", cli)
+
     with tempfile.NamedTemporaryFile(mode="wb", suffix=".txt", delete=False) as f:
         f.write(prompt.encode("utf-8"))
         tmp_path = f.name
+
     try:
-        log.info("tmp exists=%s size=%s", os.path.exists(tmp_path), os.path.getsize(tmp_path) if os.path.exists(tmp_path) else "N/A")
-        # Тест: работает ли type вообще?
-        r_type = subprocess.run(f'type "{tmp_path}"', shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-        log.info("type test rc=%d bytes=%d stderr=%r", r_type.returncode, len(r_type.stdout or b""), (r_type.stderr or b"")[:80])
-        # Тест: запускается ли вообще что-нибудь через shell?
-        r_echo = subprocess.run("echo ok", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-        log.info("echo test rc=%d out=%r", r_echo.returncode, r_echo.stdout[:20])
-        cli_dir = os.path.dirname(cli)
-        import glob as _glob, shutil as _shutil
-        log.info("CLAUDE_CLI env=%r", os.environ.get("CLAUDE_CLI"))
-        log.info("isfile=%s isdir=%s home=%r", os.path.isfile(cli), os.path.isdir(cli_dir), str(Path.home()))
-        for _sub in ["AppData", "AppData\\Roaming", "AppData\\Roaming\\Claude"]:
-            _p = str(Path.home() / _sub)
-            try:
-                log.info("listdir(%s)=%r", _sub, os.listdir(_p)[:8])
-            except Exception as _e:
-                log.info("listdir(%s) err=%r", _sub, _e)
-        log.info("which(claude)=%r", _shutil.which("claude"))
-        # Тест 1: доступна ли директория claude через cmd?
-        r_dir = subprocess.run(f'dir "{cli_dir}"', shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-        log.info("dir test rc=%d bytes=%d err=%r", r_dir.returncode, len(r_dir.stdout), r_dir.stderr[:60])
-        r_dir2 = subprocess.run('echo %APPDATA%', shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-        log.info("cmd APPDATA=%r", r_dir2.stdout.strip())
-        # Тест 2: PowerShell вместо cmd
-        r_ps = subprocess.run(
-            ['powershell', '-NoProfile', '-NonInteractive', '-Command', f'& "{cli}" --version'],
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20,
-        )
-        log.info("powershell claude rc=%d out=%r err=%r", r_ps.returncode, r_ps.stdout[:80], r_ps.stderr[:80])
-        # Основной вызов — пробуем PowerShell pipe
-        if r_ps.returncode == 0:
-            log.info("PowerShell работает — используем его для основного вызова")
+        with open(tmp_path, "rb") as fh:
             result = subprocess.run(
-                ['powershell', '-NoProfile', '-NonInteractive', '-Command',
-                 f'Get-Content -Raw -Encoding UTF8 "{tmp_path}" | & "{cli}" -p -'],
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300,
-            )
-        else:
-            result = subprocess.run(
-                f'type "{tmp_path}" | "{cli}" -p -',
-                shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300,
+                [cli, "-p", "-"],
+                stdin=fh,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=300,
             )
     finally:
-        os.unlink(tmp_path)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
     stdout_text = (result.stdout or b"").decode("utf-8", errors="replace")
-    stderr_text = (result.stderr or b"").decode("cp1251", errors="replace")
-    log.info("claude rc=%d stdout=%d chars stderr=%r", result.returncode, len(stdout_text), stderr_text[:200])
+    stderr_text = (result.stderr or b"").decode("utf-8", errors="replace")
+    log.info("claude rc=%d stdout=%d chars stderr=%r",
+             result.returncode, len(stdout_text), stderr_text[:200])
+
     if result.returncode != 0:
         raise RuntimeError(
             f"claude CLI завершился с кодом {result.returncode}: {stderr_text[:300]}"
@@ -147,6 +121,7 @@ def write_analysis_md(
     agenda: str,
     transcription_path: Path,
     prompt_path: Optional[Path] = None,
+    ask_claude: Optional[Callable] = None,
 ) -> Path:
     """Генерирует _analysis.md. Сохраняет промпт рядом. Возвращает путь."""
     prompt = _build_prompt(transcription_path, title, started_at, agenda)
@@ -156,7 +131,17 @@ def write_analysis_md(
         prompt_path.write_text(prompt, encoding="utf-8")
         log.info("Промпт анализа сохранён: %s", prompt_path)
 
-    analysis_text = _call_claude(prompt)
+    try:
+        analysis_text = _call_claude_cli(prompt)
+    except (FileNotFoundError, OSError, RuntimeError) as e:
+        if ask_claude is None:
+            raise
+        log.warning("CLI недоступен (%s) — показываем диалог ручного запуска", e)
+        cli = config._find_claude_cli()
+        result = ask_claude("анализ", prompt_path, cli)
+        if result is None:
+            raise RuntimeError("Пользователь отменил генерацию анализа") from e
+        analysis_text = result
 
     date = (started_at or "")[:10]
     header = f"# Смысловой анализ: {title or 'Встреча'}\n\n**Дата:** {date}\n\n---\n\n"

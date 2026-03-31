@@ -13,6 +13,7 @@ Desktop-приложение для Windows (Python + tkinter) которое:
 - faster-whisper (whisper-large-v3, CUDA), pyannote.audio 3.x (CPU)
 - SQLite (app/storage/db.py), WAV-чанки по 30 сек
 - LLM: `claude -p "prompt"` subprocess (Claude.ai subscription, не API credits)
+- **Anthropic API намеренно не используется**: корпоративные Google Workspace аккаунты не разрешают подключать сторонние OAuth/API приложения. Используем только CLI.
 
 ## Структура
 ```
@@ -43,6 +44,7 @@ data/recordings/       # WAV-чанки по сессиям
 - pipeline идемпотентен: каждый этап проверяет наличие файла перед запуском
 - `init_db()` сбрасывает зависшие `processing` → `pending` при старте
 - LLM-промпты сохраняются в `*_analysis_prompt.md` / `*_followup_prompt.md` для ручного перезапуска
+- Когда CLI недоступен — показывается `ClaudeManualDialog` с 3 кнопками: «Запустить», «Скопировать команду», «Скопировать промпт»
 - `sqlite3.Row` → всегда конвертировать в `dict()` перед `.get()`
 
 ## Запуск
