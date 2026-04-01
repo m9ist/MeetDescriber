@@ -29,12 +29,14 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-# Включаем до любого другого кода — пишет трейсбек при SIGABRT/SIGSEGV на stderr
-faulthandler.enable()
-
 import config
 
 _LOG_PATH = config.ROOT_DIR / "app.log"
+
+# faulthandler пишет напрямую через OS write() — работает даже при SIGABRT.
+# Направляем в app.log чтобы трейсбек был там, а не только в терминале.
+_fault_log = open(_LOG_PATH, "a", buffering=1)
+faulthandler.enable(file=_fault_log)
 
 
 class _FlushFileHandler(logging.FileHandler):
