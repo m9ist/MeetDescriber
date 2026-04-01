@@ -17,7 +17,7 @@
 - `sqlite3.Row` → всегда конвертировать в `dict()` перед `.get()`
 - LLM вызывается через `claude -p` subprocess (подписка Claude.ai), Anthropic API намеренно не используется
 
-**Находки при адаптации на Mac (CP1–CP4):**
+**Находки при адаптации на Mac (CP1–CP7):**
 - Системный Python macOS — 3.9; код использует `str | None` (Python 3.10+) — нужен Python 3.11 через `brew install python@3.11` + `brew install python-tk@3.11` (tkinter идёт отдельно)
 - `torchaudio 2.11+` убрал `torchaudio.AudioMetaData` — ломает `pyannote.audio 3.3.2`; решение: обновить до `pyannote.audio==4.0.4` (4.x не использует этот API); тогда torch/torchaudio версии не принципиальны
 - `requirements-mac.txt` изначально содержал `rumps` вместо `pystray` — исправлено
@@ -26,6 +26,12 @@
 - macOS требует разрешение на микрофон даже для виртуальных устройств; диалог появляется только при запуске из Terminal.app напрямую, не из подпроцесса
 - `pyannote.audio 3.3.2` несовместима с `huggingface_hub >= 0.23` (убран `use_auth_token=`) — решение: `pyannote.audio==4.0.4`
 - pyannote 4.x не нужно явно передавать токен — берёт `HF_TOKEN` из окружения автоматически
+- pystray на Mac требует main thread для NSStatusItem — нельзя запускать в фоновом потоке
+- `root.mainloop()` отпускает GIL в C-коде Tk; PyObjC NSMenu callback в этот момент → SIGABRT. Решение: ручной цикл `nextEventMatchingMask + root.update()`
+- `root.after()` из PyObjC callbacks небезопасен — нужна `SimpleQueue` как промежуточный буфер; main loop дренирует её между итерациями
+- Claude Code на Mac: `~/Library/Application Support/Claude/claude-code-vm/<version>/claude`
+- `os._exit(0)` нужен для выхода — `sys.exit()` и `ns_app.terminate_()` вызывают cleanup daemon-потоков → crash reporter
+- На Mac кнопки tkinter игнорируют `bg`/`fg`/`relief="flat"` — нужно убирать эти параметры для нативного Aqua-вида
 
 ---
 
@@ -85,11 +91,13 @@
 
 ## Checkpoint 7 — End-to-end тест
 
-- [ ] Запустить через `start_mac.sh`, убедиться что tray появился
-- [ ] Ручной запуск записи через tray-меню
-- [ ] Зайти в Google Meet, проверить автодетект через расширение
-- [ ] Дождаться конца встречи, проверить транскрипцию и все 3 документа
-- [ ] Проверить Claude Manual Dialog — запуск анализа
+- [x] Запустить через `start_mac.sh`, убедиться что tray появился ✓
+- [x] Ручной запуск записи через tray-меню ✓
+- [x] Транскрипция + диаризация отработали на реальном аудио ✓
+- [x] Claude Manual Dialog — диалог появляется, кнопки работают ✓
+- [x] Все 3 документа созданы (transcription, analysis, followup) ✓
+- [x] Выход через tray-меню работает корректно ✓
+- [ ] Автодетект через Chrome Extension — проверить на реальной Meet-встрече
 
 ---
 
