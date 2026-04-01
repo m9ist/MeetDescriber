@@ -99,15 +99,11 @@ class App:
         self._refresh_tray_jobs()
 
         if config.IS_MAC:
-            # macOS: AppKit требует main thread для NSStatusItem.
-            # Tkinter (Tcl/Tk) запускаем в фоновом потоке — его event loop
-            # независим от NSApplication и работает корректно.
-            threading.Thread(
-                target=self._root.mainloop,
-                daemon=True,
-                name="tkinter",
-            ).start()
-            self._tray.run_blocking()  # блокирует main thread
+            # macOS: pystray и tkinter оба используют NSApplication.sharedApplication().
+            # Icon создаётся на main thread, run_detached() не запускает event loop.
+            # root.mainloop() (Aqua backend) гоняет NSApplication — обслуживает оба.
+            self._tray.start_for_mac()
+            self._root.mainloop()
         else:
             # Windows: tkinter занимает main thread, pystray — фоновый поток.
             self._tray.start()

@@ -110,9 +110,20 @@ class ForMeetsTray:
         """Запускает трей в отдельном потоке (Windows)."""
         threading.Thread(target=self._run, daemon=True, name="tray").start()
 
-    def run_blocking(self) -> None:
-        """Запускает трей в вызывающем потоке (Mac — AppKit требует main thread)."""
-        self._run()
+    def start_for_mac(self) -> None:
+        """macOS: создаёт Icon и вызывает run_detached().
+
+        Должно вызываться на main thread ДО root.mainloop().
+        tkinter Aqua backend использует тот же NSApplication.sharedApplication(),
+        поэтому root.mainloop() гоняет event loop для обоих.
+        """
+        self._icon = pystray.Icon(
+            "for_meets",
+            _make_icon(self._recording),
+            "for_meets",
+            menu=self._build_menu(),
+        )
+        self._icon.run_detached()
 
     def stop(self) -> None:
         if self._icon:
