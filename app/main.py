@@ -55,7 +55,11 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger("app")
-log.info("=== app start ===")  # первая запись сразу при старте
+log.info("=== app start ===")
+
+# Подавляем DEBUG-спам от numba/httpcore — захламляет лог
+for _noisy in ("numba", "httpcore", "httpx", "urllib3"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)  # первая запись сразу при старте
 
 from app.storage.db import init_db, get_conn, update_session, update_job_paths
 from app.storage.file_manager import rename_session_docs
@@ -201,6 +205,7 @@ class App:
         self._root.after(0, show)
 
     def _on_stop_manual(self) -> None:
+        log.info("_on_stop_manual called")
         self._root.after(0, self._stop_and_offer_processing)
 
     # ── Сессия ────────────────────────────────────────────────────────────────
@@ -242,11 +247,15 @@ class App:
         self._tray.set_recording(True, self._current_title)
 
     def _stop_and_offer_processing(self) -> None:
+        log.info("_stop_and_offer_processing called")
         if not self._capture or not self._capture.is_recording:
+            log.info("no capture active, returning")
             return
 
+        log.info("stopping capture...")
         self._capture.stop()
         self._capture = None
+        log.info("capture stopped")
         self._spectrum.hide()
 
         session_id = self._current_session_id
