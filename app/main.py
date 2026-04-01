@@ -18,6 +18,7 @@ import sys
 import io
 import faulthandler
 import logging
+import queue
 import threading
 import tkinter as tk
 import traceback
@@ -79,6 +80,9 @@ class App:
         self._current_title: str = ""
         self._skip_tab_ids: set[int] = set()  # встречи помеченные "не записывать"
         self._latest_tabs: list[dict] = []    # последний известный список вкладок Chrome
+        # На Mac: PyObjC callbacks не могут безопасно вызывать tkinter напрямую.
+        # Все tkinter-операции передаём через эту очередь и выполняем в main loop.
+        self._mac_queue: queue.SimpleQueue = queue.SimpleQueue()
 
         # Tkinter root — главный поток
         self._root = tk.Tk()
@@ -119,19 +123,18 @@ class App:
         self._refresh_tray_jobs()
 
         if config.IS_MAC:
-            # macOS: ни root.mainloop() ни pystray.run() не вызываем напрямую.
-            # root.mainloop() отпускает GIL внутри Tk C-кода; когда AppKit
-            # диспатчит NSMenu коллбэк через PyObjC — GIL уже released → SIGABRT.
-            # Решение: ручной цикл на main thread:
-            #   - NSApp.nextEvent(...) ждёт событие (до 10мс), не отпуская GIL надолго
-            #   - sendEvent_() вызывает PyObjC-коллбэк с корректным GIL
-            #   - root.update() обрабатывает очередь tkinter без блокировки
+            # macOS: ручной event loop — единственный безопасный способ совместить
+            # tkinter (Aqua/Tk) и pystray (PyObjC/NSStatusItem).
+            # root.mainloop() отпускает GIL в C-коде Tk; PyObjC callback из NSMenu
+            # в этот момент получает GIL released → SIGABRT.
+            # Решение: дренируем NSApp и tkinter по очереди, GIL всегда у нас.
             import AppKit
             import Foundation
             self._tray.start_for_mac()
             ns_app = AppKit.NSApplication.sharedApplication()
             ns_app.finishLaunching()
             while True:
+                # Обрабатываем NSApp события (меню, иконка)
                 event = ns_app.nextEventMatchingMask_untilDate_inMode_dequeue_(
                     AppKit.NSUIntegerMax,
                     Foundation.NSDate.dateWithTimeIntervalSinceNow_(0.01),
@@ -140,6 +143,14 @@ class App:
                 )
                 if event:
                     ns_app.sendEvent_(event)
+                # Дренируем очередь от PyObjC callbacks → выполняем в main thread
+                while not self._mac_queue.empty():
+                    try:
+                        fn = self._mac_queue.get_nowait()
+                        fn()
+                    except Exception:
+                        log.error("mac_queue callback error", exc_info=True)
+                # Обрабатываем tkinter события
                 try:
                     self._root.update()
                 except tk.TclError:
@@ -171,12 +182,12 @@ class App:
             # Начинаем запись (уведомление уже показано — пользователь может нажать "не записывать")
             self._start_session(title=title, source="meet")
 
-        self._root.after(0, show)
+        self._schedule(show)
 
     def _handle_meet_ended(self, msg: dict) -> None:
         tab_id = msg.get("tab_id")
         self._skip_tab_ids.discard(tab_id)
-        self._root.after(0, self._stop_and_offer_processing)
+        self._schedule(self._stop_and_offer_processing)
 
     def _handle_tabs(self, msg: dict) -> None:
         self._latest_tabs = msg.get("tabs", [])
@@ -202,11 +213,24 @@ class App:
                     source="manual",
                     device_index=device_index,
                 )
-        self._root.after(0, show)
+        self._schedule(show)
 
     def _on_stop_manual(self) -> None:
         log.info("_on_stop_manual called")
-        self._root.after(0, self._stop_and_offer_processing)
+        self._schedule(self._stop_and_offer_processing)
+
+    def _schedule(self, fn) -> None:
+        """Thread-safe планировщик для tkinter-операций.
+
+        На Mac: PyObjC callbacks вызываются из NSApplication event loop;
+        прямой вызов root.after() из них ненадёжен — кладём в очередь,
+        которую опрашивает главный цикл.
+        На Windows: напрямую root.after(0, fn).
+        """
+        if config.IS_MAC:
+            self._mac_queue.put(fn)
+        else:
+            self._root.after(0, fn)
 
     # ── Сессия ────────────────────────────────────────────────────────────────
 
@@ -312,12 +336,11 @@ class App:
         def ask_claude(stage: str, prompt_path, cli: str,
                        chat_prompt: str = "", output_path=None):
             result_q = _queue.Queue()
-            self._root.after(
-                0,
+            self._schedule(
                 lambda: ClaudeManualDialog(
                     self._root, stage, prompt_path, cli, result_q,
                     chat_prompt=chat_prompt, output_path=output_path,
-                ),
+                )
             )
             return result_q.get(timeout=1800)  # 30 мин
 
@@ -348,7 +371,7 @@ class App:
                 modal.update("error", str(e)[:60])
             finally:
                 modal.close()
-                self._root.after(0, self._refresh_tray_jobs)
+                self._schedule(self._refresh_tray_jobs)
 
         threading.Thread(target=run, daemon=True, name=f"pipeline-{job_id}").start()
 
@@ -501,7 +524,7 @@ class App:
     def _on_quit(self) -> None:
         if self._capture and self._capture.is_recording:
             self._capture.stop()
-        self._root.after(0, self._root.quit)
+        self._schedule(self._root.quit)
 
 
 def main() -> None:
