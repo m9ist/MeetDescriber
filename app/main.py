@@ -16,6 +16,7 @@
 """
 import sys
 import io
+import faulthandler
 import logging
 import threading
 import tkinter as tk
@@ -28,18 +29,31 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
+# Включаем до любого другого кода — пишет трейсбек при SIGABRT/SIGSEGV на stderr
+faulthandler.enable()
+
 import config
 
 _LOG_PATH = config.ROOT_DIR / "app.log"
+
+
+class _FlushFileHandler(logging.FileHandler):
+    """FileHandler с немедленным flush — критично когда процесс падает с SIGABRT."""
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
     handlers=[
-        logging.FileHandler(_LOG_PATH, encoding="utf-8"),
+        _FlushFileHandler(_LOG_PATH, encoding="utf-8"),
         logging.StreamHandler(sys.stderr),
     ],
 )
 log = logging.getLogger("app")
+log.info("=== app start ===")  # первая запись сразу при старте
 
 from app.storage.db import init_db, get_conn, update_session, update_job_paths
 from app.storage.file_manager import rename_session_docs
