@@ -76,7 +76,7 @@ for_meets/
 | H1 | WASAPI loopback захватывает системный звук на Windows | ✅ Подтверждена | HyperX Amp Chat loopback, 304 KB / 5 сек |
 | H2 | BlackHole захватывает звук на Mac | ✅ Подтверждена | RMS=4177 на реальном аудио. Частота 48кГц, 2ch. Требуется разрешение на микрофон (Terminal.app) |
 | H3 | faster-whisper (CUDA) даёт приемлемое качество для русского live-аудио | ✅ Подтверждена | CUDA работает; качество на реальной речи — Этап 4 |
-| H4 | mlx-whisper работает на Mac M4 Pro | ⏳ Отложена | Проверим на Mac |
+| H4 | mlx-whisper работает на Mac M4 Pro | ✅ Подтверждена | mlx-community/whisper-large-v3-mlx загружается и транскрибирует. pyannote.audio 4.0.4 на CPU работает. |
 | H5 | pyannote.audio разделяет спикеров в русской речи | ✅ Технически работает | Pipeline загружается и работает на CUDA. Качество на русской речи — Этап 4. Нюанс: pyannote 4.x требует передавать аудио как тензор (torchcodec не работает на Windows без FFmpeg full-shared) |
 | H6 | Confidence score Whisper коррелирует с реальным качеством | ✅ Подтверждена | Чистый сигнал → высокий score, шум → низкий |
 | H7 | Native Messaging между Chrome и Python работает стабильно | ✅ Подтверждена | Chrome детектит meet.google.com → расширение отправляет meet_started/meet_ended → Python-хост получает. Нюанс: .bat не работает с Chrome CreateProcess — нужен .exe (PyInstaller --onedir) |
@@ -130,7 +130,7 @@ for_meets/
 ### Этап 4 — Транскрипция и диаризация ✅ `[H3, H4, H5, H6, H8]`
 - [x] `TranscriptionBackend` абстракция + `get_backend()` фабрика
 - [x] `faster-whisper` (Windows/CUDA) `[H3]`
-- [x] `mlx-whisper` (Mac) `[H4]` — реализован, проверить на Mac
+- [x] `mlx-whisper` (Mac) `[H4]` — проверено на Mac M4 Pro ✓
 - [x] `pyannote.audio` диаризация (WAV → torch.Tensor, без torchcodec) `[H5]`
 - [x] Совмещение транскрипции с диаризацией по максимальному перекрытию
 - [x] Детекция имён спикеров по regex-паттернам + сохранение в БД
