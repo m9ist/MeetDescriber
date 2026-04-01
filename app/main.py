@@ -113,11 +113,31 @@ class App:
         self._refresh_tray_jobs()
 
         if config.IS_MAC:
-            # macOS: pystray и tkinter оба используют NSApplication.sharedApplication().
-            # Icon создаётся на main thread, run_detached() не запускает event loop.
-            # root.mainloop() (Aqua backend) гоняет NSApplication — обслуживает оба.
+            # macOS: ни root.mainloop() ни pystray.run() не вызываем напрямую.
+            # root.mainloop() отпускает GIL внутри Tk C-кода; когда AppKit
+            # диспатчит NSMenu коллбэк через PyObjC — GIL уже released → SIGABRT.
+            # Решение: ручной цикл на main thread:
+            #   - NSApp.nextEvent(...) ждёт событие (до 10мс), не отпуская GIL надолго
+            #   - sendEvent_() вызывает PyObjC-коллбэк с корректным GIL
+            #   - root.update() обрабатывает очередь tkinter без блокировки
+            import AppKit
+            import Foundation
             self._tray.start_for_mac()
-            self._root.mainloop()
+            ns_app = AppKit.NSApplication.sharedApplication()
+            ns_app.finishLaunching()
+            while True:
+                event = ns_app.nextEventMatchingMask_untilDate_inMode_dequeue_(
+                    AppKit.NSUIntegerMax,
+                    Foundation.NSDate.dateWithTimeIntervalSinceNow_(0.01),
+                    AppKit.NSDefaultRunLoopMode,
+                    True,
+                )
+                if event:
+                    ns_app.sendEvent_(event)
+                try:
+                    self._root.update()
+                except tk.TclError:
+                    break  # root был уничтожен → выход
         else:
             # Windows: tkinter занимает main thread, pystray — фоновый поток.
             self._tray.start()
