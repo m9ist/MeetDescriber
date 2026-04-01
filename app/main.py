@@ -413,7 +413,7 @@ class App:
             update_session(session_id, new_title or old_title, new_agenda)
             self._refresh_tray_jobs()
 
-        self._root.after(0, show)
+        self._schedule(show)
 
     def _delete_job_files(self, conn, job_id: int) -> None:
         """Удаляет файлы задания с диска и записи из БД (job + session)."""
