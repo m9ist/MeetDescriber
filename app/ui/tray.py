@@ -107,8 +107,12 @@ class ForMeetsTray:
         self._refresh()
 
     def start(self) -> None:
-        """Запускает трей в отдельном потоке."""
+        """Запускает трей в отдельном потоке (Windows)."""
         threading.Thread(target=self._run, daemon=True, name="tray").start()
+
+    def run_blocking(self) -> None:
+        """Запускает трей в вызывающем потоке (Mac — AppKit требует main thread)."""
+        self._run()
 
     def stop(self) -> None:
         if self._icon:

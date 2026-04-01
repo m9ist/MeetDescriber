@@ -90,16 +90,28 @@ class App:
     # ── Запуск ────────────────────────────────────────────────────────────────
 
     def run(self) -> None:
-        self._tray.start()
-        self._refresh_tray_jobs()
-
         threading.Thread(
             target=self._host.run,
             daemon=True,
             name="native-host",
         ).start()
 
-        self._root.mainloop()
+        self._refresh_tray_jobs()
+
+        if config.IS_MAC:
+            # macOS: AppKit требует main thread для NSStatusItem.
+            # Tkinter (Tcl/Tk) запускаем в фоновом потоке — его event loop
+            # независим от NSApplication и работает корректно.
+            threading.Thread(
+                target=self._root.mainloop,
+                daemon=True,
+                name="tkinter",
+            ).start()
+            self._tray.run_blocking()  # блокирует main thread
+        else:
+            # Windows: tkinter занимает main thread, pystray — фоновый поток.
+            self._tray.start()
+            self._root.mainloop()
 
     # ── Обработчики Chrome ────────────────────────────────────────────────────
 
