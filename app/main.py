@@ -156,16 +156,15 @@ class App:
                     self._root.update()
                 except tk.TclError:
                     break  # root был уничтожен → выход
-            # Корректное завершение через Cocoa API
+            # Корректное завершение: убираем иконку, затем жёсткий выход.
+            # ns_app.terminate_() и sys.exit() вызывают зачистку daemon-потоков
+            # что приводит к crash-репорту macOS. os._exit() завершает немедленно.
             try:
                 self._tray.stop()
             except Exception:
                 pass
-            try:
-                self._root.destroy()
-            except Exception:
-                pass
-            ns_app.terminate_(None)  # правильный способ завершить NSApplication
+            import os as _os
+            _os._exit(0)
         else:
             # Windows: tkinter занимает main thread, pystray — фоновый поток.
             self._tray.start()
