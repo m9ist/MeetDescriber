@@ -92,6 +92,13 @@ def _find_claude_cli() -> str:
             if os.path.isfile(_p):
                 return _p
     elif IS_MAC:
+        # Claude Code на Mac устанавливается в ~/Library/Application Support/Claude/claude-code-vm/<version>/claude
+        _app_support = os.path.expanduser("~/Library/Application Support/Claude/claude-code-vm")
+        if os.path.isdir(_app_support):
+            for _ver in sorted(os.listdir(_app_support), reverse=True):
+                _p = os.path.join(_app_support, _ver, "claude")
+                if os.path.isfile(_p):
+                    return _p
         _mac_candidates = [
             os.path.expanduser("~/.claude/local/claude"),
             "/usr/local/bin/claude",
