@@ -359,7 +359,7 @@ class App:
             ).fetchone()
         title = row["title"] if row else "Встреча"
 
-        modal = ProcessingStatusWindow(self._root, title)
+        modal = ProcessingStatusWindow(self._root, title, schedule_fn=self._schedule)
         modal.show()
         ask_claude = self._make_ask_claude()
 

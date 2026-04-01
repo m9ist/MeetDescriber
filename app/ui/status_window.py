@@ -37,9 +37,12 @@ class ProcessingStatusWindow:
     Все методы можно вызывать из фонового потока — они маршалируются в UI через after().
     """
 
-    def __init__(self, root: tk.Tk, title: str) -> None:
+    def __init__(self, root: tk.Tk, title: str, schedule_fn=None) -> None:
         self._root = root
         self._meeting_title = title
+        # На Mac root.after() из фонового потока падает с "main thread is not in main loop".
+        # Передаём thread-safe schedule_fn (app._schedule) если есть, иначе root.after.
+        self._schedule = schedule_fn if schedule_fn else lambda fn: root.after(0, fn)
         self._win: Optional[tk.Toplevel] = None
         self._stage_var: Optional[tk.StringVar] = None
         self._detail_var: Optional[tk.StringVar] = None
@@ -52,13 +55,13 @@ class ProcessingStatusWindow:
     # ── Публичный API ─────────────────────────────────────────────────────────
 
     def show(self) -> None:
-        self._root.after(0, self._create)
+        self._schedule(self._create)
 
     def update(self, stage: str, detail: str = "") -> None:
-        self._root.after(0, lambda: self._update(stage, detail))
+        self._schedule(lambda: self._update(stage, detail))
 
     def close(self) -> None:
-        self._root.after(800, self._destroy)
+        self._schedule(self._destroy)
 
     # ── Внутреннее ────────────────────────────────────────────────────────────
 
