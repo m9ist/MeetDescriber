@@ -8,6 +8,8 @@ import tkinter as tk
 from tkinter import font as tkfont
 from typing import Callable, Optional
 
+import config
+
 _root: Optional[tk.Tk] = None
 
 
@@ -43,14 +45,14 @@ def _show_recording_started(meeting_title: str, on_skip: Callable[[], None]) -> 
     tk.Label(
         frame, text="⏺  Запись началась",
         bg="#2b2b2b", fg="#ffffff",
-        font=("Segoe UI", 11, "bold"),
+        font=(config.UI_FONT, 11, "bold"),
         anchor="w",
     ).pack(fill="x")
 
     tk.Label(
         frame, text=meeting_title or "Google Meet",
         bg="#2b2b2b", fg="#aaaaaa",
-        font=("Segoe UI", 9),
+        font=(config.UI_FONT, 9),
         anchor="w",
     ).pack(fill="x", pady=(2, 8))
 
@@ -64,7 +66,7 @@ def _show_recording_started(meeting_title: str, on_skip: Callable[[], None]) -> 
         bg="#444444", fg="#ffffff",
         relief="flat", padx=8, pady=4,
         cursor="hand2",
-        font=("Segoe UI", 9),
+        font=(config.UI_FONT, 9),
     ).pack(anchor="w")
 
     win.after(9000, lambda: win.destroy() if win.winfo_exists() else None)
@@ -92,14 +94,14 @@ def _show_quality_toast(chunk_idx: int, score: float) -> None:
         frame,
         text=f"⚠  Плохо слышно (последние ~30 сек)",
         bg="#3a2a00", fg="#ffcc44",
-        font=("Segoe UI", 9),
+        font=(config.UI_FONT, 9),
         anchor="w",
     ).pack(fill="x")
 
     tk.Label(
         frame, text=f"Уверенность: {score:.0%}",
         bg="#3a2a00", fg="#888866",
-        font=("Segoe UI", 8),
+        font=(config.UI_FONT, 8),
         anchor="w",
     ).pack(fill="x")
 
@@ -135,14 +137,14 @@ def _show_process_now(
     tk.Label(
         frame, text="✓  Встреча завершена",
         bg="#1e2a1e", fg="#ffffff",
-        font=("Segoe UI", 11, "bold"),
+        font=(config.UI_FONT, 11, "bold"),
         anchor="w",
     ).pack(fill="x")
 
     tk.Label(
         frame, text=session_title or "Встреча",
         bg="#1e2a1e", fg="#aaaaaa",
-        font=("Segoe UI", 9),
+        font=(config.UI_FONT, 9),
         anchor="w",
     ).pack(fill="x", pady=(2, 8))
 
@@ -163,7 +165,7 @@ def _show_process_now(
         bg="#2d6a2d", fg="#ffffff",
         relief="flat", padx=10, pady=4,
         cursor="hand2",
-        font=("Segoe UI", 9, "bold"),
+        font=(config.UI_FONT, 9, "bold"),
     ).pack(side="left", padx=(0, 6))
 
     tk.Button(
@@ -172,7 +174,7 @@ def _show_process_now(
         bg="#444444", fg="#cccccc",
         relief="flat", padx=10, pady=4,
         cursor="hand2",
-        font=("Segoe UI", 9),
+        font=(config.UI_FONT, 9),
     ).pack(side="left")
 
     win.after(30000, lambda: (do_later(), None) if win.winfo_exists() else None)

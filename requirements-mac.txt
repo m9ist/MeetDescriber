@@ -12,14 +12,15 @@ sounddevice>=0.4.6
 mlx-whisper>=0.3.0
 
 # Диаризация
-pyannote.audio==3.3.2
-# PyTorch для Mac (MPS backend) — устанавливается автоматически с pyannote
+pyannote.audio==4.0.4
+# PyTorch: pyannote 4.x тянет 2.11+, torchaudio опциональна (pyannote 4.x не использует AudioMetaData)
 
-# LLM
-anthropic>=0.25.0
+# LLM (опционально — через Claude CLI, не через SDK)
+# anthropic>=0.25.0
 
 # Tray (menu bar)
-rumps>=0.4.0
+pystray>=0.19.5
+Pillow>=10.0.0
 
 # Уведомления
 plyer>=2.1.0

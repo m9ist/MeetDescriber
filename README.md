@@ -32,7 +32,7 @@
 - HuggingFace токен с доступом к gated-репозиториям pyannote
 - Chrome с установленным расширением (для автодетекта Meet)
 
-### Установка
+### Установка (Windows)
 
 ```bash
 # Создать venv и поставить зависимости
@@ -48,10 +48,57 @@ cp .env.example .env
 python app/extension/install_host.py
 ```
 
-### Запуск
+### Запуск (Windows)
 
 ```bash
 python -m app.main
+# или двойной клик на start_windows.vbs
+```
+
+### Установка (macOS)
+
+> **Требования:** Python 3.11 (системный macOS Python — 3.9, не подходит).
+> Tkinter идёт отдельным пакетом от Homebrew.
+
+```bash
+# Установить Python 3.11 и tkinter
+brew install python@3.11 python-tk@3.11
+
+# Предварительно: установить BlackHole (виртуальный аудиодрайвер)
+# После установки требуется перезагрузка
+brew install blackhole-2ch
+
+# Создать venv и поставить зависимости
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-mac.txt
+
+# Скопировать и заполнить .env
+cp .env.example .env
+# HUGGINGFACE_TOKEN=hf_...
+# CLAUDE_CLI=/Users/username/.claude/local/claude
+
+# Зарегистрировать Native Messaging хост для Chrome
+python app/extension/install_host.py
+```
+
+### Настройка аудио (macOS)
+
+После установки BlackHole настрой маршрутизацию звука:
+
+1. Открой **Audio MIDI Setup** (`/Applications/Utilities/`)
+2. Нажми `+` → **"Create Multi-Output Device"**
+3. Включи галочки: **BlackHole 2ch** и **MacBook Pro Speakers** (или наушники)
+4. Установи частоту **48,0 кГц**
+5. **System Settings → Sound → Output** → выбрать **Multi-Output Device**
+
+При первом запуске приложения macOS запросит доступ к микрофону — разрешить.
+
+### Запуск (macOS)
+
+```bash
+python3 -m app.main
+# или ./start_mac.sh
 ```
 
 ## Структура документов

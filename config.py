@@ -47,6 +47,15 @@ if HUGGINGFACE_TOKEN and not os.getenv("HF_TOKEN"):
 IS_WINDOWS = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 
+# На Mac добавляем Homebrew в PATH — нужен ffmpeg для mlx-whisper
+if IS_MAC:
+    for _brew_bin in ("/opt/homebrew/bin", "/usr/local/bin"):
+        if _brew_bin not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = _brew_bin + os.pathsep + os.environ.get("PATH", "")
+
+# UI
+UI_FONT = "Segoe UI" if IS_WINDOWS else "Helvetica"
+
 # Настройки захвата
 CHUNK_DURATION_SEC = 30          # длина одного чанка
 SILENCE_THRESHOLD_RMS = 100      # ниже — считается тишиной
@@ -58,7 +67,8 @@ WHISPER_LANGUAGE = "ru"
 
 # Claude CLI — путь к исполняемому файлу
 # Задаётся через CLAUDE_CLI в .env (например C:/Users/Oleg/.local/bin/claude.exe).
-# Фолбек: PATH, затем "claude".
+# Фолбек: платформо-зависимые типичные пути, затем PATH, затем "claude".
+import glob as _glob
 import shutil as _shutil
 
 
@@ -66,13 +76,31 @@ def _find_claude_cli() -> str:
     """Возвращает путь к claude CLI.
 
     Приоритет:
-    1. CLAUDE_CLI в .env — явный путь к claude.exe
-    2. PATH (shutil.which)
-    3. Фолбек: "claude"
+    1. CLAUDE_CLI в .env — явный путь
+    2. Типичные пути установки для текущей платформы
+    3. PATH (shutil.which)
+    4. Фолбек: "claude"
     """
     if _env := os.getenv("CLAUDE_CLI"):
         if os.path.isfile(_env):
             return _env
+
+    if IS_WINDOWS:
+        # Claude Code на Windows устанавливается в %APPDATA%\Claude\claude-code\<version>\
+        _appdata = os.environ.get("APPDATA", "")
+        for _p in _glob.glob(os.path.join(_appdata, "Claude", "claude-code", "*", "claude.exe")):
+            if os.path.isfile(_p):
+                return _p
+    elif IS_MAC:
+        _mac_candidates = [
+            os.path.expanduser("~/.claude/local/claude"),
+            "/usr/local/bin/claude",
+            "/opt/homebrew/bin/claude",
+        ]
+        for _p in _mac_candidates:
+            if os.path.isfile(_p):
+                return _p
+
     if _which := _shutil.which("claude"):
         return _which
     return "claude"

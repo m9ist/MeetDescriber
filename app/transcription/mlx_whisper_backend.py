@@ -16,7 +16,7 @@ from app.transcription.backend import (
 
 class MLXWhisperBackend(TranscriptionBackend):
 
-    def transcribe(self, audio_path: Path) -> TranscriptionResult:
+    def transcribe(self, audio_path: Path, on_progress=None) -> TranscriptionResult:
         import mlx_whisper
 
         result = mlx_whisper.transcribe(
@@ -27,7 +27,9 @@ class MLXWhisperBackend(TranscriptionBackend):
         )
 
         segments: list[TranscriptionSegment] = []
-        for seg in result.get("segments", []):
+        all_segs = result.get("segments", [])
+        total_duration = all_segs[-1]["end"] if all_segs else 0.0
+        for seg in all_segs:
             words = []
             probs = []
             for w in seg.get("words", []):
@@ -48,6 +50,8 @@ class MLXWhisperBackend(TranscriptionBackend):
                 confidence=confidence,
                 words=words,
             ))
+            if on_progress:
+                on_progress(seg["end"], total_duration)
 
         duration = result["segments"][-1]["end"] if result.get("segments") else 0.0
         return TranscriptionResult(

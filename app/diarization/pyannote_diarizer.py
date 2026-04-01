@@ -38,9 +38,11 @@ def _get_pipeline():
                 warnings.filterwarnings("ignore", message="torchcodec is not installed")
                 warnings.filterwarnings("ignore", category=UserWarning, module="torio")
                 from pyannote.audio import Pipeline
+            # HF_TOKEN уже выставлен в config.py — huggingface_hub подхватывает автоматически.
+            # Не передаём токен явно: pyannote 3.x использует use_auth_token=,
+            # pyannote 4.x — token=, а новый huggingface_hub убрал use_auth_token.
             _pipeline = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-3.1",
-                token=config.HUGGINGFACE_TOKEN,
             )
             # Принудительно CPU: после загрузки whisper-large-v3 (~3GB)
             # в VRAM места для pyannote не остаётся — hard crash в CUDA runtime.

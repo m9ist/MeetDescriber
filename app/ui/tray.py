@@ -12,12 +12,24 @@
   - ──────────────────
   - Выход
 """
+import os
+import subprocess
 import threading
 from pathlib import Path
 from typing import Callable, Optional
 
 import pystray
 from PIL import Image, ImageDraw
+
+import config
+
+
+def _open_path(path: str) -> None:
+    """Открывает файл или папку штатными средствами ОС."""
+    if config.IS_WINDOWS:
+        os.startfile(path)
+    else:
+        subprocess.run(["open", path], check=False)
 
 
 def _make_icon(recording: bool = False) -> Image.Image:
@@ -193,20 +205,18 @@ class ForMeetsTray:
         return f"{label_dt}  {title}{suffix}"
 
     def _make_done_submenu(self, job: dict) -> pystray.Menu:
-        import os
-
         def open_folder(icon, item):
             # Ищем первый существующий файл, открываем его папку
             for key in ("transcription_path", "analysis_path", "followup_path"):
                 p = job.get(key)
                 if p and Path(p).exists():
-                    os.startfile(str(Path(p).parent))
+                    _open_path(str(Path(p).parent))
                     return
 
         def make_open_file(path_str):
             def handler(icon, item):
                 if path_str and Path(path_str).exists():
-                    os.startfile(path_str)
+                    _open_path(path_str)
             return handler
 
         def edit_info(icon, item):

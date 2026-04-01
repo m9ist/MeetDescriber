@@ -10,6 +10,8 @@ import tkinter as tk
 import tkinter.ttk as ttk
 from typing import Optional
 
+import config
+
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 _STAGE_LABELS: dict[str, str] = {
@@ -82,7 +84,7 @@ class ProcessingStatusWindow:
             frame,
             text=f"Обработка: {self._meeting_title}",
             bg="#1a1a2e", fg="#7777aa",
-            font=("Segoe UI", 9),
+            font=(config.UI_FONT, 9),
             anchor="w",
         ).pack(fill="x")
 
@@ -94,7 +96,7 @@ class ProcessingStatusWindow:
         tk.Label(
             row, textvariable=self._stage_var,
             bg="#1a1a2e", fg="#ffffff",
-            font=("Segoe UI", 11, "bold"),
+            font=(config.UI_FONT, 11, "bold"),
             anchor="w",
         ).pack(side="left")
 
@@ -102,7 +104,7 @@ class ProcessingStatusWindow:
         tk.Label(
             row, textvariable=self._detail_var,
             bg="#1a1a2e", fg="#aaaacc",
-            font=("Segoe UI", 10),
+            font=(config.UI_FONT, 10),
             anchor="w",
         ).pack(side="left", padx=(8, 0))
 
@@ -110,7 +112,7 @@ class ProcessingStatusWindow:
         tk.Label(
             row, textvariable=self._spinner_var,
             bg="#1a1a2e", fg="#5566cc",
-            font=("Segoe UI", 13),
+            font=(config.UI_FONT, 13),
             anchor="e",
         ).pack(side="right")
 

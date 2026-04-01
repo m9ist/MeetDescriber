@@ -76,7 +76,7 @@ class MeetingStartDialog:
             command=self._on_ok,
             bg="#2d6a2d", fg="white",
             relief="flat", padx=14, pady=6,
-            font=("Segoe UI", 9, "bold"),
+            font=(config.UI_FONT, 9, "bold"),
         ).pack(side="right", padx=(6, 0))
 
         tk.Button(
@@ -202,7 +202,7 @@ class ClaudeManualDialog:
         tk.Label(
             win,
             text=f"Не удалось запустить claude для этапа «{stage}».",
-            font=("Segoe UI", 10, "bold"),
+            font=(config.UI_FONT, 10, "bold"),
         ).pack(fill="x", **pad)
 
         if prompt_path:
@@ -232,7 +232,7 @@ class ClaudeManualDialog:
             command=self._on_run,
             bg="#2d6a2d", fg="white",
             relief="flat", padx=12, pady=6,
-            font=("Segoe UI", 9, "bold"),
+            font=(config.UI_FONT, 9, "bold"),
         )
         self._run_btn.pack(side="left", padx=(0, 6))
 
@@ -260,7 +260,7 @@ class ClaudeManualDialog:
             command=self._on_stage_done,
             relief="flat", padx=10, pady=5,
             bg="#1a5276", fg="white",
-            font=("Segoe UI", 9, "bold"),
+            font=(config.UI_FONT, 9, "bold"),
         ).pack(side="left")
 
         tk.Button(
@@ -410,7 +410,7 @@ class MeetingEditDialog:
             command=self._on_ok,
             bg="#2d6a2d", fg="white",
             relief="flat", padx=14, pady=6,
-            font=("Segoe UI", 9, "bold"),
+            font=(config.UI_FONT, 9, "bold"),
         ).pack(side="right", padx=(6, 0))
 
         tk.Button(

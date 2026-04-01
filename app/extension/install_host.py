@@ -34,11 +34,27 @@ def get_exe_path(host_script: str) -> str:
     return str(exe)
 
 
+def create_sh_launcher(python_exe: str, host_script: str) -> str:
+    """
+    Создаёт for_meets_host.sh рядом со скриптом хоста и делает его исполняемым.
+    Chrome на Mac требует исполняемый файл — .py напрямую не запускается.
+    Возвращает путь к созданному .sh файлу.
+    """
+    sh_path = Path(host_script).parent / "for_meets_host.sh"
+    sh_path.write_text(
+        f"#!/bin/bash\n"
+        f"PYTHONUNBUFFERED=1 \"{python_exe}\" \"{host_script}\" \"$@\"\n",
+        encoding="utf-8",
+    )
+    sh_path.chmod(sh_path.stat().st_mode | 0o111)  # chmod +x
+    return str(sh_path)
+
+
 def get_host_manifest(python_exe: str, host_script: str) -> dict:
     if platform.system() == "Windows":
         path = get_exe_path(host_script)
     else:
-        path = python_exe
+        path = create_sh_launcher(python_exe, host_script)
     return {
         "name": HOST_NAME,
         "description": "for_meets Native Messaging Host",
@@ -90,6 +106,8 @@ def install_mac(python_exe: str, host_script: str, extension_id: str | None) -> 
     manifest = get_host_manifest(python_exe, host_script)
     if extension_id:
         manifest["allowed_origins"] = [f"chrome-extension://{extension_id}/"]
+
+    print(f"  ✓  Лончер создан: {manifest['path']}")
 
     host_dir = Path.home() / "Library/Application Support/Google/Chrome/NativeMessagingHosts"
     host_dir.mkdir(parents=True, exist_ok=True)

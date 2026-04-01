@@ -180,8 +180,8 @@ class AudioCapture:
                 raise RuntimeError("BlackHole не найден. Установи: brew install blackhole-2ch")
             device_index = bh
 
-        self._rate = 44100
-        self._channels = 1
+        self._rate = 48000
+        self._channels = 2
         frames_per_chunk = int(self._rate * config.CHUNK_DURATION_SEC)
         buffer: list[bytes] = []
         frames_buffered = 0
@@ -287,11 +287,47 @@ def _get_quality_model():
     global _quality_model
     with _quality_model_lock:
         if _quality_model is None:
-            from faster_whisper import WhisperModel
-            # Принудительно CPU: tiny-модель быстрая, а GPU-контекст делить с основной
-            # моделью из другого потока небезопасно — вызывает hard crash в CUDA runtime.
-            _quality_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+            if config.IS_WINDOWS:
+                from faster_whisper import WhisperModel
+                # Принудительно CPU: tiny-модель быстрая, а GPU-контекст делить с основной
+                # моделью из другого потока небезопасно — вызывает hard crash в CUDA runtime.
+                _quality_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+            elif config.IS_MAC:
+                import mlx_whisper as _mlx
+                # Обёртка: приводим mlx_whisper к интерфейсу faster_whisper (transcribe → segments)
+                _quality_model = _MlxQualityModel(_mlx)
     return _quality_model
+
+
+class _MlxQualityModel:
+    """Тонкая обёртка над mlx_whisper для оценки качества чанка на Mac."""
+
+    def __init__(self, mlx_whisper_module) -> None:
+        self._mlx = mlx_whisper_module
+
+    def transcribe(self, path: str, language: str = "ru", word_timestamps: bool = False):
+        result = self._mlx.transcribe(
+            path,
+            path_or_hf_repo="mlx-community/whisper-tiny-mlx",
+            language=language,
+            word_timestamps=word_timestamps,
+        )
+        segments = [_MlxSegment(s) for s in result.get("segments", [])]
+        return segments, result
+
+
+class _MlxSegment:
+    """Приводит сегмент mlx_whisper к интерфейсу faster_whisper."""
+
+    def __init__(self, seg: dict) -> None:
+        self.words = [
+            _MlxWord(w) for w in seg.get("words", [])
+        ] if seg.get("words") else []
+
+
+class _MlxWord:
+    def __init__(self, w: dict) -> None:
+        self.probability = w.get("probability", 1.0)
 
 
 def list_audio_sources() -> list[dict]:

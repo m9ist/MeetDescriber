@@ -192,7 +192,7 @@ class SpectrumWidget:
         # REC-точка
         c.create_oval(5, 5, 13, 13, fill="#ff2222", outline="")
         c.create_text(17, 9, text="REC", fill="#ff5555",
-                      anchor="w", font=("Segoe UI", 7, "bold"))
+                      anchor="w", font=(config.UI_FONT, 7, "bold"))
 
         # Бары
         usable_w = WIDTH - PAD * 2
