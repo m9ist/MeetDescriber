@@ -156,7 +156,7 @@ class App:
                     self._root.update()
                 except tk.TclError:
                     break  # root был уничтожен → выход
-            # Корректное завершение: убираем иконку и останавливаем NSApp
+            # Корректное завершение через Cocoa API
             try:
                 self._tray.stop()
             except Exception:
@@ -165,8 +165,7 @@ class App:
                 self._root.destroy()
             except Exception:
                 pass
-            import sys as _sys
-            _sys.exit(0)
+            ns_app.terminate_(None)  # правильный способ завершить NSApplication
         else:
             # Windows: tkinter занимает main thread, pystray — фоновый поток.
             self._tray.start()
