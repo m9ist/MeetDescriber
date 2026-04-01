@@ -226,13 +226,14 @@ class ClaudeManualDialog:
         btn_frame = tk.Frame(win)
         btn_frame.pack(fill="x", padx=14, pady=8)
 
+        _btn_kw = {"padx": 10, "pady": 5} if config.IS_WINDOWS else {"padx": 10}
+
         self._run_btn = tk.Button(
             btn_frame,
             text="Запустить",
             command=self._on_run,
-            bg="#2d6a2d", fg="white",
-            relief="flat", padx=12, pady=6,
             font=(config.UI_FONT, 9, "bold"),
+            **_btn_kw,
         )
         self._run_btn.pack(side="left", padx=(0, 6))
 
@@ -240,14 +241,14 @@ class ClaudeManualDialog:
             btn_frame,
             text="Скопировать команду",
             command=self._on_copy_cmd,
-            relief="flat", padx=10, pady=6,
+            **_btn_kw,
         ).pack(side="left", padx=(0, 6))
 
         tk.Button(
             btn_frame,
             text="Скопировать промпт",
             command=self._on_copy_prompt,
-            relief="flat", padx=10, pady=6,
+            **_btn_kw,
         ).pack(side="left")
 
         # Кнопка "Этап выполнен" + "Пропустить"
@@ -258,17 +259,15 @@ class ClaudeManualDialog:
             bottom_frame,
             text="Этап выполнен",
             command=self._on_stage_done,
-            relief="flat", padx=10, pady=5,
-            bg="#1a5276", fg="white",
             font=(config.UI_FONT, 9, "bold"),
+            **_btn_kw,
         ).pack(side="left")
 
         tk.Button(
             bottom_frame,
             text="Пропустить этот этап",
             command=self._on_skip,
-            relief="flat", padx=10, pady=5,
-            fg="#888",
+            **_btn_kw,
         ).pack(side="right")
 
         # Центрируем
