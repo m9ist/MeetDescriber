@@ -83,6 +83,7 @@ class App:
         # На Mac: PyObjC callbacks не могут безопасно вызывать tkinter напрямую.
         # Все tkinter-операции передаём через эту очередь и выполняем в main loop.
         self._mac_queue: queue.SimpleQueue = queue.SimpleQueue()
+        self._running: bool = True  # флаг выхода для ручного event loop на Mac
 
         # Tkinter root — главный поток
         self._root = tk.Tk()
@@ -133,7 +134,7 @@ class App:
             self._tray.start_for_mac()
             ns_app = AppKit.NSApplication.sharedApplication()
             ns_app.finishLaunching()
-            while True:
+            while self._running:
                 # Обрабатываем NSApp события (меню, иконка)
                 event = ns_app.nextEventMatchingMask_untilDate_inMode_dequeue_(
                     AppKit.NSUIntegerMax,
@@ -524,6 +525,7 @@ class App:
     def _on_quit(self) -> None:
         if self._capture and self._capture.is_recording:
             self._capture.stop()
+        self._running = False
         self._schedule(self._root.quit)
 
 
