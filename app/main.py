@@ -156,6 +156,17 @@ class App:
                     self._root.update()
                 except tk.TclError:
                     break  # root был уничтожен → выход
+            # Корректное завершение: убираем иконку и останавливаем NSApp
+            try:
+                self._tray.stop()
+            except Exception:
+                pass
+            try:
+                self._root.destroy()
+            except Exception:
+                pass
+            import sys as _sys
+            _sys.exit(0)
         else:
             # Windows: tkinter занимает main thread, pystray — фоновый поток.
             self._tray.start()
