@@ -71,18 +71,19 @@ class MeetingStartDialog:
         btn_frame = tk.Frame(win)
         btn_frame.pack(fill="x", padx=12, pady=(8, 12))
 
+        _btn_kw = {"padx": 10, "pady": 6} if config.IS_WINDOWS else {"padx": 10}
+
         tk.Button(
             btn_frame, text="Начать запись",
             command=self._on_ok,
-            bg="#2d6a2d", fg="white",
-            relief="flat", padx=14, pady=6,
             font=(config.UI_FONT, 9, "bold"),
+            **_btn_kw,
         ).pack(side="right", padx=(6, 0))
 
         tk.Button(
             btn_frame, text="Отмена",
             command=win.destroy,
-            relief="flat", padx=10, pady=6,
+            **_btn_kw,
         ).pack(side="right")
 
         # Центрируем окно
@@ -404,18 +405,19 @@ class MeetingEditDialog:
         btn_frame = tk.Frame(win)
         btn_frame.pack(fill="x", padx=12, pady=(8, 12))
 
+        _btn_kw = {"padx": 10, "pady": 6} if config.IS_WINDOWS else {"padx": 10}
+
         tk.Button(
             btn_frame, text="Сохранить",
             command=self._on_ok,
-            bg="#2d6a2d", fg="white",
-            relief="flat", padx=14, pady=6,
             font=(config.UI_FONT, 9, "bold"),
+            **_btn_kw,
         ).pack(side="right", padx=(6, 0))
 
         tk.Button(
             btn_frame, text="Отмена",
             command=win.destroy,
-            relief="flat", padx=10, pady=6,
+            **_btn_kw,
         ).pack(side="right")
 
         win.update_idletasks()
