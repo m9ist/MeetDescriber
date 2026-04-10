@@ -14,9 +14,9 @@
 
 Базовый пайплайн реализован и протестирован:
 
-- ✅ Захват системного аудио (WASAPI loopback, Windows)
+- ✅ Захват системного аудио (WASAPI loopback на Windows, BlackHole на macOS)
 - ✅ Автодетект Google Meet через Chrome расширение
-- ✅ Транскрипция (faster-whisper, large-v3, CUDA)
+- ✅ Транскрипция (faster-whisper/CUDA на Windows, mlx-whisper/Apple Silicon на macOS)
 - ✅ Диаризация спикеров (pyannote.audio 4.x, CPU)
 - ✅ LLM-анализ и follow-up через `claude -p` (подписка Claude.ai)
 - ✅ Tray-приложение с меню заданий
@@ -26,9 +26,9 @@
 
 ### Требования
 
-- Python 3.10+
-- NVIDIA GPU (для транскрипции)
-- [Claude Code](https://code.claude.com/docs/en/overview) установлен и авторизован; путь к `claude.exe` задаётся через `CLAUDE_CLI` в `.env`
+- Python 3.11+
+- NVIDIA GPU + CUDA 12.x (Windows) или Apple Silicon (macOS)
+- [Claude Code](https://code.claude.com/docs/en/overview) установлен и авторизован
 - HuggingFace токен с доступом к gated-репозиториям pyannote
 - Chrome с установленным расширением (для автодетекта Meet)
 
@@ -97,8 +97,14 @@ python app/extension/install_host.py
 ### Запуск (macOS)
 
 ```bash
+# Создать .app бандл (один раз)
+bash create_mac_app.sh
+
+# Запуск — двойной клик MeetDescriber.app в Finder
+# или из терминала:
+open MeetDescriber.app
+# или напрямую:
 python3 -m app.main
-# или ./start_mac.sh
 ```
 
 ## Структура документов

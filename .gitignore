@@ -14,3 +14,4 @@ data/documents/
 data/meets.db
 *.log
 .claude/
+MeetDescriber.app/
