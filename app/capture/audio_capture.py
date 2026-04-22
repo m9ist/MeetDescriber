@@ -215,7 +215,13 @@ class AudioCapture:
                     frames_buffered += frames_per_read
 
                     if self.on_audio_frame:
-                        self.on_audio_frame(mc_data)
+                        lb_peek_size = frames_per_read * self._channels * 2
+                        with lb_lock:
+                            lb_peek = bytes(lb_raw[-lb_peek_size:]) if len(lb_raw) >= lb_peek_size else None
+                        if lb_peek:
+                            self.on_audio_frame(_mix_audio(lb_peek, mc_data, self._channels, mic_channels))
+                        else:
+                            self.on_audio_frame(mc_data)
 
                     if frames_buffered >= frames_per_chunk:
                         _flush_chunk()
