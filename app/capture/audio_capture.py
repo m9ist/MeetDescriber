@@ -116,6 +116,7 @@ class AudioCapture:
         import pyaudiowpatch as pyaudio
 
         log = logging.getLogger(__name__)
+        log.setLevel(logging.DEBUG)
         pa = pyaudio.PyAudio()
         try:
             device = self._find_wasapi_loopback(pa, device_index)
@@ -144,10 +145,21 @@ class AudioCapture:
             lb_lock = threading.Lock()
 
             def _lb_reader():
+                import time
+                frame_period = frames_per_read / self._rate  # ожидаемое время одного read (~10.67ms)
                 while self._recording:
                     try:
+                        t0 = time.monotonic()
                         data = loopback_stream.read(frames_per_read, exception_on_overflow=False)
+                        elapsed = time.monotonic() - t0
                         with lb_lock:
+                            # Если read заблокировался дольше ожидаемого — системный звук
+                            # не поступал. Вставляем тишину чтобы сохранить выравнивание
+                            # lb_raw по стенному времени с mc_raw.
+                            silence_sec = elapsed - frame_period
+                            if silence_sec > frame_period:
+                                silence_frames = int(silence_sec * self._rate)
+                                lb_raw.extend(bytes(silence_frames * self._channels * 2))
                             lb_raw.extend(data)
                     except OSError:
                         break
@@ -193,6 +205,16 @@ class AudioCapture:
                 mc_bytes = bytes(mc_raw)
                 mc_raw.clear()
                 if mic_stream is not None:
+                    lb_frames_raw = len(lb_bytes) // (2 * self._channels)
+                    mc_frames_raw = len(mc_bytes) // (2 * mic_channels)
+                    diff = lb_frames_raw - mc_frames_raw
+                    log.debug(
+                        "flush: lb=%d frames, mc=%d frames, diff=%+d frames (%.3fs)",
+                        lb_frames_raw, mc_frames_raw, diff, diff / self._rate,
+                    )
+                    # Обрезаем lb до длины mc, чтобы любой дрейф не добавлял тишину в конец
+                    mc_frames_count = len(mc_bytes) // (2 * mic_channels)
+                    lb_bytes = lb_bytes[: mc_frames_count * self._channels * 2]
                     mixed = _mix_audio(lb_bytes, mc_bytes, self._channels, mic_channels)
                 else:
                     mixed = lb_bytes
@@ -200,6 +222,15 @@ class AudioCapture:
                     self._process_chunk(mixed)
 
             if mic_stream is not None:
+                # Сбрасываем lb_raw: lb_reader стартует раньше mic-loop и успевает
+                # накопить несколько фреймов. Без сброса lb_raw будет длиннее mc_raw
+                # → сдвиг при миксе.
+                with lb_lock:
+                    pre_clear = len(lb_raw)
+                    del lb_raw[:]
+                log.debug("lb_raw cleared before mic loop: discarded %d bytes (%.3fs)",
+                          pre_clear, pre_clear / (2 * self._channels * self._rate))
+
                 # Mic-driven: mic определяет темп и длительность чанка.
                 # Loopback пишется асинхронно в lb_raw, микс — при сохранении.
                 while self._recording:
