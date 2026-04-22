@@ -112,7 +112,7 @@ class AudioCapture:
     def _capture_wasapi(self, device_index: Optional[int]) -> None:
         import audioop
         import logging
-        import queue as _queue
+        import time
         import pyaudiowpatch as pyaudio
 
         log = logging.getLogger(__name__)
@@ -126,9 +126,9 @@ class AudioCapture:
             # Таймаут ожидания loopback-данных: 2 периода чтения.
             # При тишине (нет системного звука) loopback блокируется;
             # таймаут позволяет основному циклу всё равно записывать mic.
-            lb_timeout = (frames_per_read / self._rate) * 2  # ~21ms при 48kHz
+            lb_timeout = (frames_per_read / self._rate) * 2  # ~21ms при 48kHz (для loopback-only режима)
 
-            loopback_stream = pa.open(
+loopback_stream = pa.open(
                 format=pyaudio.paInt16,
                 channels=self._channels,
                 rate=self._rate,
@@ -138,17 +138,22 @@ class AudioCapture:
             )
             self._loopback_stream = loopback_stream
 
-            lb_queue: _queue.Queue = _queue.Queue(maxsize=200)
-            lb_silence = bytes(frames_per_read * self._channels * 2)
+            lb_buf = bytearray()
+            lb_lock = threading.Lock()
+            lb_bytes_per_read = frames_per_read * self._channels * 2
+            lb_silence = bytes(lb_bytes_per_read)
+            # Максимум ~2 секунды loopback-данных в буфере
+            lb_max_bytes = lb_bytes_per_read * int(self._rate * 2 / frames_per_read)
 
             def _lb_reader():
                 while self._recording:
                     try:
                         data = loopback_stream.read(frames_per_read, exception_on_overflow=False)
-                        try:
-                            lb_queue.put_nowait(data)
-                        except _queue.Full:
-                            pass
+                        with lb_lock:
+                            lb_buf.extend(data)
+                            # Отбрасываем старые данные если буфер переполнен
+                            if len(lb_buf) > lb_max_bytes:
+                                del lb_buf[:len(lb_buf) - lb_max_bytes]
                     except OSError:
                         break
 
@@ -198,10 +203,12 @@ class AudioCapture:
                         mc_data, mic_resample_state = audioop.ratecv(
                             mc_data, 2, mic_channels, mic_rate, self._rate, mic_resample_state
                         )
-                    try:
-                        lb_data = lb_queue.get(timeout=0.005)
-                    except _queue.Empty:
-                        lb_data = lb_silence
+                    with lb_lock:
+                        if len(lb_buf) >= lb_bytes_per_read:
+                            lb_data = bytes(lb_buf[:lb_bytes_per_read])
+                            del lb_buf[:lb_bytes_per_read]
+                        else:
+                            lb_data = lb_silence
                     data = _mix_audio(lb_data, mc_data, self._channels, mic_channels)
 
                     if self.on_audio_frame:
@@ -216,10 +223,15 @@ class AudioCapture:
             else:
                 # Нет mic: loopback-driven loop с таймаутом против вечной блокировки.
                 while self._recording:
-                    try:
-                        lb_data = lb_queue.get(timeout=lb_timeout)
-                    except _queue.Empty:
-                        lb_data = lb_silence
+                    with lb_lock:
+                        if len(lb_buf) >= lb_bytes_per_read:
+                            lb_data = bytes(lb_buf[:lb_bytes_per_read])
+                            del lb_buf[:lb_bytes_per_read]
+                        else:
+                            lb_data = None
+                    if lb_data is None:
+                        time.sleep(lb_timeout)
+                        continue
 
                     if self.on_audio_frame:
                         self.on_audio_frame(lb_data)
