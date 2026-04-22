@@ -63,6 +63,7 @@ class AudioCapture:
         self._channels: int = 0
         self._sample_width: int = 2
         self._loopback_stream = None
+        self._mic_stream = None
 
     def start(self, device_index: Optional[int] = None) -> None:
         """Запускает захват в фоновом потоке."""
@@ -82,12 +83,12 @@ class AudioCapture:
     def stop(self) -> None:
         """Останавливает захват. Блокирует до завершения потока."""
         self._recording = False
-        # Прерываем блокирующий read() в WASAPI loopback (блокируется при тишине)
-        if self._loopback_stream is not None:
-            try:
-                self._loopback_stream.stop_stream()
-            except Exception:
-                pass
+        for stream in (self._loopback_stream, self._mic_stream):
+            if stream is not None:
+                try:
+                    stream.stop_stream()
+                except Exception:
+                    pass
         if self._thread:
             self._thread.join(timeout=10)
             self._thread = None
@@ -109,7 +110,9 @@ class AudioCapture:
                 self.on_error(exc)
 
     def _capture_wasapi(self, device_index: Optional[int]) -> None:
+        import audioop
         import logging
+        import queue as _queue
         import pyaudiowpatch as pyaudio
 
         log = logging.getLogger(__name__)
@@ -120,6 +123,10 @@ class AudioCapture:
             self._channels = min(int(device["maxInputChannels"]), 2)
             frames_per_chunk = int(self._rate * config.CHUNK_DURATION_SEC)
             frames_per_read = 512
+            # Таймаут ожидания loopback-данных: 2 периода чтения.
+            # При тишине (нет системного звука) loopback блокируется;
+            # таймаут позволяет основному циклу всё равно записывать mic.
+            lb_timeout = (frames_per_read / self._rate) * 2  # ~21ms при 48kHz
 
             loopback_stream = pa.open(
                 format=pyaudio.paInt16,
@@ -131,15 +138,33 @@ class AudioCapture:
             )
             self._loopback_stream = loopback_stream
 
+            lb_queue: _queue.Queue = _queue.Queue(maxsize=200)
+            lb_silence = bytes(frames_per_read * self._channels * 2)
+
+            def _lb_reader():
+                while self._recording:
+                    try:
+                        data = loopback_stream.read(frames_per_read, exception_on_overflow=False)
+                        try:
+                            lb_queue.put_nowait(data)
+                        except _queue.Full:
+                            pass
+                    except OSError:
+                        break
+
+            threading.Thread(target=_lb_reader, daemon=True, name="lb-reader").start()
+
+            # Microphone
             mic_stream = None
             mic_channels = self._channels
             mic_rate = self._rate
             mic_resample_state = None
+
             mic_dev = self._find_default_mic(pa)
             if mic_dev is not None:
                 mic_channels = min(int(mic_dev["maxInputChannels"]), 2)
-                mic_rate = int(mic_dev.get("defaultSampleRate", self._rate))
-                for try_rate in (self._rate, mic_rate):
+                mic_rate_native = int(mic_dev.get("defaultSampleRate", self._rate))
+                for try_rate in (self._rate, mic_rate_native):
                     try:
                         mic_stream = pa.open(
                             format=pyaudio.paInt16,
@@ -150,6 +175,7 @@ class AudioCapture:
                             frames_per_buffer=frames_per_read,
                         )
                         mic_rate = try_rate
+                        self._mic_stream = mic_stream
                         log.info("mic stream opened: %s (%dch @ %dHz)", mic_dev["name"], mic_channels, mic_rate)
                         break
                     except Exception as e:
@@ -159,50 +185,64 @@ class AudioCapture:
             buffer: list[bytes] = []
             frames_buffered = 0
 
-            while self._recording:
-                try:
-                    lb_data = loopback_stream.read(frames_per_read, exception_on_overflow=False)
-                except OSError:
-                    break
-                if mic_stream:
+            if mic_stream is not None:
+                # Mic-driven loop: mic читается блокирующе (всегда поставляет данные),
+                # loopback берётся из lb_queue non-blocking. Loop работает с правильной
+                # частотой (~10.7ms) даже при полной тишине в системе.
+                while self._recording:
                     try:
-                        import audioop
                         mc_data = mic_stream.read(frames_per_read, exception_on_overflow=False)
-                        if mic_rate != self._rate:
-                            mc_data, mic_resample_state = audioop.ratecv(
-                                mc_data, 2, mic_channels, mic_rate, self._rate, mic_resample_state
-                            )
-                        data = _mix_audio(lb_data, mc_data, self._channels, mic_channels)
-                    except Exception:
-                        data = lb_data
-                else:
-                    data = lb_data
+                    except OSError:
+                        break
+                    if mic_rate != self._rate:
+                        mc_data, mic_resample_state = audioop.ratecv(
+                            mc_data, 2, mic_channels, mic_rate, self._rate, mic_resample_state
+                        )
+                    try:
+                        lb_data = lb_queue.get_nowait()
+                    except _queue.Empty:
+                        lb_data = lb_silence
+                    data = _mix_audio(lb_data, mc_data, self._channels, mic_channels)
 
-                if self.on_audio_frame:
-                    self.on_audio_frame(data)
-                buffer.append(data)
-                frames_buffered += frames_per_read
+                    if self.on_audio_frame:
+                        self.on_audio_frame(data)
+                    buffer.append(data)
+                    frames_buffered += frames_per_read
 
-                if frames_buffered >= frames_per_chunk:
-                    self._process_chunk(b"".join(buffer))
-                    buffer = []
-                    frames_buffered = 0
+                    if frames_buffered >= frames_per_chunk:
+                        self._process_chunk(b"".join(buffer))
+                        buffer = []
+                        frames_buffered = 0
+            else:
+                # Нет mic: loopback-driven loop с таймаутом против вечной блокировки.
+                while self._recording:
+                    try:
+                        lb_data = lb_queue.get(timeout=lb_timeout)
+                    except _queue.Empty:
+                        lb_data = lb_silence
+
+                    if self.on_audio_frame:
+                        self.on_audio_frame(lb_data)
+                    buffer.append(lb_data)
+                    frames_buffered += frames_per_read
+
+                    if frames_buffered >= frames_per_chunk:
+                        self._process_chunk(b"".join(buffer))
+                        buffer = []
+                        frames_buffered = 0
 
             if buffer:
                 self._process_chunk(b"".join(buffer))
 
             self._loopback_stream = None
-            try:
-                loopback_stream.stop_stream()
-                loopback_stream.close()
-            except Exception:
-                pass
-            if mic_stream:
-                try:
-                    mic_stream.stop_stream()
-                    mic_stream.close()
-                except Exception:
-                    pass
+            self._mic_stream = None
+            for s in (loopback_stream, mic_stream):
+                if s is not None:
+                    try:
+                        s.stop_stream()
+                        s.close()
+                    except Exception:
+                        pass
         finally:
             pa.terminate()
 
