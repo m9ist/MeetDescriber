@@ -246,7 +246,7 @@ def run_transcription(
         )
         with get_conn() as conn:
             conn.execute(
-                "UPDATE jobs SET analysis_path=?, updated_at=datetime('now') WHERE id=?",
+                "UPDATE jobs SET analysis_path=?, status='analyzed', updated_at=datetime('now') WHERE id=?",
                 (str(doc_paths["analysis"]), job_id),
             )
 

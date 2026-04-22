@@ -479,7 +479,7 @@ class App:
         with get_conn() as conn:
             job_ids = [
                 r["id"] for r in conn.execute(
-                    "SELECT id FROM jobs WHERE status IN ('pending', 'transcribed')"
+                    "SELECT id FROM jobs WHERE status IN ('pending', 'transcribed', 'analyzed')"
                 ).fetchall()
             ]
             for job_id in job_ids:
@@ -491,7 +491,7 @@ class App:
             pending_rows = conn.execute("""
                 SELECT j.id, j.status, s.title, s.started_at
                 FROM jobs j JOIN sessions s ON s.id = j.session_id
-                WHERE j.status IN ('pending', 'transcribed')
+                WHERE j.status IN ('pending', 'transcribed', 'analyzed')
                 ORDER BY j.created_at DESC
             """).fetchall()
 

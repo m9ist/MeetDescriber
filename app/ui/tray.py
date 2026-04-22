@@ -216,7 +216,13 @@ class ForMeetsTray:
         date = dt[:10]
         time = dt[11:16]
         label_dt = f"{date} {time}" if time else date
-        suffix = " → анализ" if job.get("status") == "transcribed" else ""
+        status = job.get("status")
+        if status == "transcribed":
+            suffix = " → анализ"
+        elif status == "analyzed":
+            suffix = " → follow-up"
+        else:
+            suffix = ""
         return f"{label_dt}  {title}{suffix}"
 
     def _make_done_submenu(self, job: dict) -> pystray.Menu:
@@ -274,8 +280,16 @@ class ForMeetsTray:
             if self._on_delete_job:
                 self._on_delete_job(job_id)
 
+        status = job.get("status", "pending")
+        if status == "analyzed":
+            action_label = "Запустить follow-up"
+        elif status == "transcribed":
+            action_label = "Запустить анализ"
+        else:
+            action_label = "Обработать"
+
         return pystray.Menu(
-            pystray.MenuItem("Обработать", process),
+            pystray.MenuItem(action_label, process),
             pystray.MenuItem("Удалить", delete),
         )
 

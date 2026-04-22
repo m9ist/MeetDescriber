@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS speakers (
 CREATE TABLE IF NOT EXISTS jobs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id  INTEGER NOT NULL REFERENCES sessions(id),
-    status      TEXT NOT NULL DEFAULT 'pending',  -- pending | processing | done | error
+    status      TEXT NOT NULL DEFAULT 'pending',  -- pending | processing | transcribed | analyzed | done | error
     transcription_path  TEXT,
     analysis_path       TEXT,
     followup_path       TEXT,
