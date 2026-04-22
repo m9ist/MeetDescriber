@@ -359,7 +359,7 @@ class App:
     def _on_process_job(self, job_id: int) -> None:
         """Запускает пайплайн транскрипции в фоновом потоке."""
         import threading
-        from app.processing.pipeline import run_transcription
+        from app.processing.pipeline import run_transcription, PipelineCancelledError
 
         with get_conn() as conn:
             row = conn.execute(
@@ -368,14 +368,19 @@ class App:
             ).fetchone()
         title = row["title"] if row else "Встреча"
 
-        modal = ProcessingStatusWindow(self._root, title, schedule_fn=self._schedule)
+        cancel_event = threading.Event()
+        modal = ProcessingStatusWindow(self._root, title, schedule_fn=self._schedule,
+                                       cancel_event=cancel_event)
         modal.show()
         ask_claude = self._make_ask_claude()
 
         def run():
             try:
-                path = run_transcription(job_id, on_progress=modal.update, ask_claude=ask_claude)
+                path = run_transcription(job_id, on_progress=modal.update,
+                                         ask_claude=ask_claude, cancel_event=cancel_event)
                 log.info("job %d done → %s", job_id, path)
+            except PipelineCancelledError:
+                log.info("job %d cancelled by user", job_id)
             except Exception as e:
                 log.error("job %d error: %s", job_id, e, exc_info=True)
                 modal.update("error", str(e)[:60])

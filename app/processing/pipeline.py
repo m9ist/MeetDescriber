@@ -14,7 +14,9 @@ Post-processing пайплайн.
 """
 from __future__ import annotations
 
+import json
 import re
+import threading
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -23,6 +25,10 @@ from app.storage.db import get_conn
 from app.storage import file_manager
 from app.transcription.backend import get_backend, TranscriptionResult
 from app.diarization.pyannote_diarizer import PyannoteDiarizer, DiarizationSegment
+
+
+class PipelineCancelledError(Exception):
+    pass
 
 
 # ── Выравнивание транскрипции и диаризации ────────────────────────────────────
@@ -141,10 +147,29 @@ def _save_speakers(session_id: int, speaker_map: dict[str, str]) -> None:
 
 # ── Главная функция ───────────────────────────────────────────────────────────
 
+def _load_diarization_cache(path: Path) -> Optional[list[DiarizationSegment]]:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return [DiarizationSegment(**d) for d in data]
+    except Exception:
+        return None
+
+
+def _save_diarization_cache(path: Path, segments: list[DiarizationSegment]) -> None:
+    path.write_text(
+        json.dumps([{"speaker": s.speaker, "start": s.start, "end": s.end} for s in segments],
+                   ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def run_transcription(
     job_id: int,
     on_progress: Optional[Callable[[str, str], None]] = None,
     ask_claude: Optional[Callable] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> Optional[Path]:
     """
     Запускает полный пайплайн Этапа 4 для задания job_id.
@@ -179,6 +204,12 @@ def run_transcription(
         if on_progress:
             on_progress(stage, detail)
 
+    def _check_cancel() -> None:
+        if cancel_event and cancel_event.is_set():
+            raise PipelineCancelledError()
+
+    diar_cache_path = session_dir / "diarization.json"
+
     # ── Этап 2: транскрипция + диаризация ────────────────────────────────────
     job = dict(job)  # sqlite3.Row → dict для .get()
 
@@ -200,10 +231,17 @@ def run_transcription(
             _progress("transcribing", f"{current:.0f}/{total:.0f}")
 
         transcription = backend.transcribe(merged, on_progress=_on_transcribe_progress)
+        _check_cancel()
 
-        _progress("diarizing")
-        diarizer = PyannoteDiarizer()
-        diarization = diarizer.diarize(merged)
+        cached = _load_diarization_cache(diar_cache_path)
+        if cached is not None:
+            diarization = cached
+        else:
+            _progress("diarizing")
+            diarizer = PyannoteDiarizer()
+            diarization = diarizer.diarize(merged)
+            _save_diarization_cache(diar_cache_path, diarization)
+        _check_cancel()
 
         _progress("aligning")
         aligned = _assign_speakers(transcription, diarization)
@@ -230,6 +268,7 @@ def run_transcription(
             )
 
     # ── Этап 5а: анализ ───────────────────────────────────────────────────────
+    _check_cancel()
     if job.get("analysis_path") and Path(job["analysis_path"]).exists():
         pass
     else:
@@ -251,6 +290,7 @@ def run_transcription(
             )
 
     # ── Этап 5б: follow-up ────────────────────────────────────────────────────
+    _check_cancel()
     if job.get("followup_path") and Path(job["followup_path"]).exists():
         pass
     else:

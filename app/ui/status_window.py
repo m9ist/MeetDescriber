@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import threading
 import tkinter as tk
 import tkinter.ttk as ttk
 from typing import Optional
@@ -37,12 +38,14 @@ class ProcessingStatusWindow:
     Все методы можно вызывать из фонового потока — они маршалируются в UI через after().
     """
 
-    def __init__(self, root: tk.Tk, title: str, schedule_fn=None) -> None:
+    def __init__(self, root: tk.Tk, title: str, schedule_fn=None,
+                 cancel_event: Optional[threading.Event] = None) -> None:
         self._root = root
         self._meeting_title = title
         # На Mac root.after() из фонового потока падает с "main thread is not in main loop".
         # Передаём thread-safe schedule_fn (app._schedule) если есть, иначе root.after.
         self._schedule = schedule_fn if schedule_fn else lambda fn: root.after(0, fn)
+        self._cancel_event = cancel_event
         self._win: Optional[tk.Toplevel] = None
         self._stage_var: Optional[tk.StringVar] = None
         self._detail_var: Optional[tk.StringVar] = None
@@ -142,6 +145,18 @@ class ProcessingStatusWindow:
         self._progressbar.pack(fill="x", pady=(6, 0))
         self._progressbar.start(50)  # indeterminate по умолчанию
 
+        if self._cancel_event is not None:
+            tk.Button(
+                frame,
+                text="Отмена",
+                command=self._on_cancel,
+                font=(config.UI_FONT, 9),
+                relief="flat",
+                bg="#3a2a2e", fg="#cc7777",
+                activebackground="#4a2a2e", activeforeground="#ff9999",
+                padx=8, pady=2,
+            ).pack(anchor="e", pady=(6, 0))
+
         self._win = win
         self._spinning = True
         self._tick()
@@ -191,6 +206,11 @@ class ProcessingStatusWindow:
             self._spinner_var.set(SPINNER[self._spinner_idx % len(SPINNER)])
             self._spinner_idx += 1
         self._root.after(100, self._tick)
+
+    def _on_cancel(self) -> None:
+        if self._cancel_event:
+            self._cancel_event.set()
+        self._destroy()
 
     def _destroy(self) -> None:
         if self._win and self._win.winfo_exists():
