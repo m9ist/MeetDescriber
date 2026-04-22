@@ -138,22 +138,17 @@ class AudioCapture:
             )
             self._loopback_stream = loopback_stream
 
-            lb_buf = bytearray()
+            # Loopback и mic пишутся в отдельные сырые буферы независимо.
+            # Микс происходит только при сохранении чанка — никакой синхронизации фреймов.
+            lb_raw = bytearray()
             lb_lock = threading.Lock()
-            lb_bytes_per_read = frames_per_read * self._channels * 2
-            lb_silence = bytes(lb_bytes_per_read)
-            # Максимум ~2 секунды loopback-данных в буфере
-            lb_max_bytes = lb_bytes_per_read * int(self._rate * 2 / frames_per_read)
 
             def _lb_reader():
                 while self._recording:
                     try:
                         data = loopback_stream.read(frames_per_read, exception_on_overflow=False)
                         with lb_lock:
-                            lb_buf.extend(data)
-                            # Отбрасываем старые данные если буфер переполнен
-                            if len(lb_buf) > lb_max_bytes:
-                                del lb_buf[:len(lb_buf) - lb_max_bytes]
+                            lb_raw.extend(data)
                     except OSError:
                         break
 
@@ -187,13 +182,26 @@ class AudioCapture:
                         log.warning("mic open failed at %dHz: %s", try_rate, e)
                         mic_stream = None
 
-            buffer: list[bytes] = []
-            frames_buffered = 0
+            mc_raw = bytearray()   # сырые байты mic за текущий чанк
+            frames_buffered = 0    # по числу mic-фреймов (определяет длительность)
+
+            def _flush_chunk():
+                """Смешивает накопленные lb_raw + mc_raw и сохраняет чанк."""
+                with lb_lock:
+                    lb_bytes = bytes(lb_raw)
+                    del lb_raw[:]
+                mc_bytes = bytes(mc_raw)
+                mc_raw.clear()
+                if mic_stream is not None:
+                    mixed = _mix_audio(lb_bytes, mc_bytes, self._channels, mic_channels)
+                else:
+                    mixed = lb_bytes
+                if mixed:
+                    self._process_chunk(mixed)
 
             if mic_stream is not None:
-                # Mic-driven loop: mic читается блокирующе (всегда поставляет данные),
-                # loopback берётся из lb_queue non-blocking. Loop работает с правильной
-                # частотой (~10.7ms) даже при полной тишине в системе.
+                # Mic-driven: mic определяет темп и длительность чанка.
+                # Loopback пишется асинхронно в lb_raw, микс — при сохранении.
                 while self._recording:
                     try:
                         mc_data = mic_stream.read(frames_per_read, exception_on_overflow=False)
@@ -203,48 +211,37 @@ class AudioCapture:
                         mc_data, mic_resample_state = audioop.ratecv(
                             mc_data, 2, mic_channels, mic_rate, self._rate, mic_resample_state
                         )
-                    with lb_lock:
-                        if len(lb_buf) >= lb_bytes_per_read:
-                            lb_data = bytes(lb_buf[:lb_bytes_per_read])
-                            del lb_buf[:lb_bytes_per_read]
-                        else:
-                            lb_data = lb_silence
-                    data = _mix_audio(lb_data, mc_data, self._channels, mic_channels)
-
-                    if self.on_audio_frame:
-                        self.on_audio_frame(data)
-                    buffer.append(data)
+                    mc_raw.extend(mc_data)
                     frames_buffered += frames_per_read
 
+                    if self.on_audio_frame:
+                        self.on_audio_frame(mc_data)
+
                     if frames_buffered >= frames_per_chunk:
-                        self._process_chunk(b"".join(buffer))
-                        buffer = []
+                        _flush_chunk()
                         frames_buffered = 0
             else:
-                # Нет mic: loopback-driven loop с таймаутом против вечной блокировки.
+                # Нет mic: loopback-driven с ожиданием данных.
                 while self._recording:
                     with lb_lock:
-                        if len(lb_buf) >= lb_bytes_per_read:
-                            lb_data = bytes(lb_buf[:lb_bytes_per_read])
-                            del lb_buf[:lb_bytes_per_read]
-                        else:
-                            lb_data = None
-                    if lb_data is None:
+                        available = len(lb_raw)
+                    if available < frames_per_read * self._channels * 2:
                         time.sleep(lb_timeout)
                         continue
-
+                    with lb_lock:
+                        chunk_bytes = bytes(lb_raw[:frames_per_read * self._channels * 2])
+                        del lb_raw[:frames_per_read * self._channels * 2]
                     if self.on_audio_frame:
-                        self.on_audio_frame(lb_data)
-                    buffer.append(lb_data)
+                        self.on_audio_frame(chunk_bytes)
+                    mc_raw.extend(chunk_bytes)
                     frames_buffered += frames_per_read
 
                     if frames_buffered >= frames_per_chunk:
-                        self._process_chunk(b"".join(buffer))
-                        buffer = []
+                        _flush_chunk()
                         frames_buffered = 0
 
-            if buffer:
-                self._process_chunk(b"".join(buffer))
+            if frames_buffered > 0:
+                _flush_chunk()
 
             self._loopback_stream = None
             self._mic_stream = None
@@ -373,10 +370,17 @@ class AudioCapture:
 
 
 def _mix_audio(lb: bytes, mc: bytes, lb_ch: int, mc_ch: int) -> bytes:
-    """Mix loopback + mic (int16 PCM). Handles mono/stereo mismatch."""
-    n_frames = min(len(lb) // (2 * lb_ch), len(mc) // (2 * mc_ch))
-    lb_samples = struct.unpack(f"<{n_frames * lb_ch}h", lb[: n_frames * lb_ch * 2])
-    mc_samples = struct.unpack(f"<{n_frames * mc_ch}h", mc[: n_frames * mc_ch * 2])
+    """Mix loopback + mic (int16 PCM). Handles mono/stereo and length mismatch."""
+    lb_frames = len(lb) // (2 * lb_ch)
+    mc_frames = len(mc) // (2 * mc_ch)
+    n_frames = max(lb_frames, mc_frames)
+    if n_frames == 0:
+        return b""
+    # Дополняем тишиной более короткий поток
+    lb_pad = lb + bytes((n_frames - lb_frames) * lb_ch * 2)
+    mc_pad = mc + bytes((n_frames - mc_frames) * mc_ch * 2)
+    lb_samples = struct.unpack(f"<{n_frames * lb_ch}h", lb_pad)
+    mc_samples = struct.unpack(f"<{n_frames * mc_ch}h", mc_pad)
     result = []
     for i in range(n_frames):
         for c in range(lb_ch):
