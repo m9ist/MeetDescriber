@@ -128,7 +128,7 @@ class AudioCapture:
             # таймаут позволяет основному циклу всё равно записывать mic.
             lb_timeout = (frames_per_read / self._rate) * 2  # ~21ms при 48kHz (для loopback-only режима)
 
-loopback_stream = pa.open(
+            loopback_stream = pa.open(
                 format=pyaudio.paInt16,
                 channels=self._channels,
                 rate=self._rate,
