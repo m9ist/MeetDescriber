@@ -102,8 +102,10 @@ class AudioCapture:
                 self.on_error(exc)
 
     def _capture_wasapi(self, device_index: Optional[int]) -> None:
+        import logging
         import pyaudiowpatch as pyaudio
 
+        log = logging.getLogger(__name__)
         pa = pyaudio.PyAudio()
         try:
             device = self._find_wasapi_loopback(pa, device_index)
@@ -112,7 +114,7 @@ class AudioCapture:
             frames_per_chunk = int(self._rate * config.CHUNK_DURATION_SEC)
             frames_per_read = 512
 
-            stream = pa.open(
+            loopback_stream = pa.open(
                 format=pyaudio.paInt16,
                 channels=self._channels,
                 rate=self._rate,
@@ -121,11 +123,50 @@ class AudioCapture:
                 frames_per_buffer=frames_per_read,
             )
 
+            mic_stream = None
+            mic_channels = self._channels
+            mic_rate = self._rate
+            mic_resample_state = None
+            mic_dev = self._find_default_mic(pa)
+            if mic_dev is not None:
+                mic_channels = min(int(mic_dev["maxInputChannels"]), 2)
+                mic_rate = int(mic_dev.get("defaultSampleRate", self._rate))
+                for try_rate in (self._rate, mic_rate):
+                    try:
+                        mic_stream = pa.open(
+                            format=pyaudio.paInt16,
+                            channels=mic_channels,
+                            rate=try_rate,
+                            input=True,
+                            input_device_index=int(mic_dev["index"]),
+                            frames_per_buffer=frames_per_read,
+                        )
+                        mic_rate = try_rate
+                        log.info("mic stream opened: %s (%dch @ %dHz)", mic_dev["name"], mic_channels, mic_rate)
+                        break
+                    except Exception as e:
+                        log.warning("mic open failed at %dHz: %s", try_rate, e)
+                        mic_stream = None
+
             buffer: list[bytes] = []
             frames_buffered = 0
 
             while self._recording:
-                data = stream.read(frames_per_read, exception_on_overflow=False)
+                lb_data = loopback_stream.read(frames_per_read, exception_on_overflow=False)
+                if mic_stream:
+                    try:
+                        import audioop
+                        mc_data = mic_stream.read(frames_per_read, exception_on_overflow=False)
+                        if mic_rate != self._rate:
+                            mc_data, mic_resample_state = audioop.ratecv(
+                                mc_data, 2, mic_channels, mic_rate, self._rate, mic_resample_state
+                            )
+                        data = _mix_audio(lb_data, mc_data, self._channels, mic_channels)
+                    except Exception:
+                        data = lb_data
+                else:
+                    data = lb_data
+
                 if self.on_audio_frame:
                     self.on_audio_frame(data)
                 buffer.append(data)
@@ -139,10 +180,30 @@ class AudioCapture:
             if buffer:
                 self._process_chunk(b"".join(buffer))
 
-            stream.stop_stream()
-            stream.close()
+            loopback_stream.stop_stream()
+            loopback_stream.close()
+            if mic_stream:
+                mic_stream.stop_stream()
+                mic_stream.close()
         finally:
             pa.terminate()
+
+    def _find_default_mic(self, pa) -> Optional[dict]:
+        import pyaudiowpatch as pyaudio
+        try:
+            wasapi_info = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
+            idx = wasapi_info.get("defaultInputDevice", -1)
+            if idx >= 0:
+                dev = pa.get_device_info_by_index(idx)
+                if not dev.get("isLoopbackDevice") and dev.get("maxInputChannels", 0) > 0:
+                    return dev
+        except Exception:
+            pass
+        for i in range(pa.get_device_count()):
+            dev = pa.get_device_info_by_index(i)
+            if not dev.get("isLoopbackDevice") and dev.get("maxInputChannels", 0) > 0:
+                return dev
+        return None
 
     def _find_wasapi_loopback(self, pa, preferred_index: Optional[int]) -> dict:
         import pyaudiowpatch as pyaudio
@@ -239,6 +300,20 @@ class AudioCapture:
             self.on_chunk_saved(path, idx)
 
         self._executor.submit(_evaluate_quality, path, idx, self.on_quality_low)
+
+
+def _mix_audio(lb: bytes, mc: bytes, lb_ch: int, mc_ch: int) -> bytes:
+    """Mix loopback + mic (int16 PCM). Handles mono/stereo mismatch."""
+    n_frames = min(len(lb) // (2 * lb_ch), len(mc) // (2 * mc_ch))
+    lb_samples = struct.unpack(f"<{n_frames * lb_ch}h", lb[: n_frames * lb_ch * 2])
+    mc_samples = struct.unpack(f"<{n_frames * mc_ch}h", mc[: n_frames * mc_ch * 2])
+    result = []
+    for i in range(n_frames):
+        for c in range(lb_ch):
+            lb_val = lb_samples[i * lb_ch + c]
+            mc_val = mc_samples[i * mc_ch + min(c, mc_ch - 1)]
+            result.append(max(-32768, min(32767, lb_val + mc_val)))
+    return struct.pack(f"<{len(result)}h", *result)
 
 
 def _calc_rms(raw: bytes) -> float:
