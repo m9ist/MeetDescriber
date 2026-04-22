@@ -62,6 +62,7 @@ class AudioCapture:
         self._rate: int = 0
         self._channels: int = 0
         self._sample_width: int = 2
+        self._loopback_stream = None
 
     def start(self, device_index: Optional[int] = None) -> None:
         """Запускает захват в фоновом потоке."""
@@ -81,6 +82,12 @@ class AudioCapture:
     def stop(self) -> None:
         """Останавливает захват. Блокирует до завершения потока."""
         self._recording = False
+        # Прерываем блокирующий read() в WASAPI loopback (блокируется при тишине)
+        if self._loopback_stream is not None:
+            try:
+                self._loopback_stream.stop_stream()
+            except Exception:
+                pass
         if self._thread:
             self._thread.join(timeout=10)
             self._thread = None
@@ -122,6 +129,7 @@ class AudioCapture:
                 input_device_index=int(device["index"]),
                 frames_per_buffer=frames_per_read,
             )
+            self._loopback_stream = loopback_stream
 
             mic_stream = None
             mic_channels = self._channels
@@ -152,7 +160,10 @@ class AudioCapture:
             frames_buffered = 0
 
             while self._recording:
-                lb_data = loopback_stream.read(frames_per_read, exception_on_overflow=False)
+                try:
+                    lb_data = loopback_stream.read(frames_per_read, exception_on_overflow=False)
+                except OSError:
+                    break
                 if mic_stream:
                     try:
                         import audioop
@@ -180,11 +191,18 @@ class AudioCapture:
             if buffer:
                 self._process_chunk(b"".join(buffer))
 
-            loopback_stream.stop_stream()
-            loopback_stream.close()
+            self._loopback_stream = None
+            try:
+                loopback_stream.stop_stream()
+                loopback_stream.close()
+            except Exception:
+                pass
             if mic_stream:
-                mic_stream.stop_stream()
-                mic_stream.close()
+                try:
+                    mic_stream.stop_stream()
+                    mic_stream.close()
+                except Exception:
+                    pass
         finally:
             pa.terminate()
 
