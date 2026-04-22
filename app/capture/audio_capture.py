@@ -199,7 +199,7 @@ class AudioCapture:
                             mc_data, 2, mic_channels, mic_rate, self._rate, mic_resample_state
                         )
                     try:
-                        lb_data = lb_queue.get_nowait()
+                        lb_data = lb_queue.get(timeout=0.005)
                     except _queue.Empty:
                         lb_data = lb_silence
                     data = _mix_audio(lb_data, mc_data, self._channels, mic_channels)
