@@ -23,6 +23,7 @@ _STAGE_LABELS: dict[str, str] = {
     "followup":     "Follow-up (LLM)...",
     "done":         "Готово ✓",
     "error":        "Ошибка",
+    "cancelling":   "Остановка после текущего этапа...",
 }
 
 
@@ -210,7 +211,9 @@ class ProcessingStatusWindow:
     def _on_cancel(self) -> None:
         if self._cancel_event:
             self._cancel_event.set()
-        self._destroy()
+        # Не закрываем окно сразу — faster-whisper/pyannote не прерываются изнутри.
+        # Показываем статус и ждём, пока pipeline дойдёт до следующей точки проверки.
+        self._schedule(lambda: self._update("cancelling", ""))
 
     def _destroy(self) -> None:
         if self._win and self._win.winfo_exists():
