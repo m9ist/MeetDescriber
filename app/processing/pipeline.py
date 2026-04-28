@@ -46,8 +46,9 @@ def _free_whisper_vram() -> None:
         import app.transcription.faster_whisper_backend as _fw
         _fw._model = None
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        # Не вызываем torch.cuda.empty_cache(): ctranslate2 держит собственный
+        # CUDA-контекст отдельно от PyTorch, вызов empty_cache() в момент его
+        # деструкции вызывает SIGABRT. gc.collect() достаточно.
         # Если pyannote уже загружен (предыдущая сессия) — переносим на CUDA
         from app.diarization.pyannote_diarizer import move_to_cuda
         move_to_cuda()
