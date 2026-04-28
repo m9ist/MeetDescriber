@@ -38,16 +38,36 @@ def _get_pipeline():
                 warnings.filterwarnings("ignore", message="torchcodec is not installed")
                 warnings.filterwarnings("ignore", category=UserWarning, module="torio")
                 from pyannote.audio import Pipeline
-            # HF_TOKEN уже выставлен в config.py — huggingface_hub подхватывает автоматически.
-            # Не передаём токен явно: pyannote 3.x использует use_auth_token=,
-            # pyannote 4.x — token=, а новый huggingface_hub убрал use_auth_token.
             _pipeline = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-3.1",
             )
-            # Принудительно CPU: после загрузки whisper-large-v3 (~3GB)
-            # в VRAM места для pyannote не остаётся — hard crash в CUDA runtime.
-            _pipeline.to(torch.device("cpu"))
+            # Грузим на CUDA если доступна, иначе CPU.
+            # pipeline.py освобождает VRAM от whisper перед вызовом диаризации,
+            # поэтому здесь CUDA должна быть свободна.
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            _pipeline.to(torch.device(device))
     return _pipeline
+
+
+def move_to_cuda() -> None:
+    """Переносит уже загруженный pipeline на CUDA.
+
+    Вызывается из pipeline.py после того, как whisper выгружен из VRAM.
+    Если pipeline ещё не загружен — ничего не делает: _get_pipeline() сам
+    выберет CUDA при первой загрузке.
+    """
+    global _pipeline, _pipeline_lock
+    if _pipeline is None:
+        return
+    import torch
+    if not torch.cuda.is_available():
+        return
+    import threading
+    if _pipeline_lock is None:
+        _pipeline_lock = threading.Lock()
+    with _pipeline_lock:
+        if _pipeline is not None:
+            _pipeline.to(torch.device("cuda"))
 
 
 def _load_wav_as_tensor(path: Path):

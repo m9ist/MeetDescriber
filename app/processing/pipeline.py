@@ -31,6 +31,30 @@ class PipelineCancelledError(Exception):
     pass
 
 
+# ── VRAM management ──────────────────────────────────────────────────────────
+
+def _free_whisper_vram() -> None:
+    """Выгружает whisper-модель из VRAM и переносит pyannote на CUDA.
+
+    Вызывается после транскрипции: whisper больше не нужен, освобождаем ~3 ГБ
+    VRAM чтобы pyannote.audio мог работать на GPU вместо CPU.
+    На CPU диаризация 30 мин аудио занимает ~50 мин; на CUDA — ~40 сек.
+    """
+    import gc
+    try:
+        import torch
+        import app.transcription.faster_whisper_backend as _fw
+        _fw._model = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        # Если pyannote уже загружен (предыдущая сессия) — переносим на CUDA
+        from app.diarization.pyannote_diarizer import move_to_cuda
+        move_to_cuda()
+    except Exception:
+        pass  # не ломаем пайплайн если что-то пошло не так
+
+
 # ── Выравнивание транскрипции и диаризации ────────────────────────────────────
 
 def _assign_speakers(
@@ -232,6 +256,9 @@ def run_transcription(
 
         transcription = backend.transcribe(merged, on_progress=_on_transcribe_progress)
         _check_cancel()
+
+        # Whisper больше не нужен — освобождаем VRAM для pyannote.
+        _free_whisper_vram()
 
         cached = _load_diarization_cache(diar_cache_path)
         if cached is not None:
