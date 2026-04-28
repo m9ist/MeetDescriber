@@ -31,31 +31,6 @@ class PipelineCancelledError(Exception):
     pass
 
 
-# ── VRAM management ──────────────────────────────────────────────────────────
-
-def _free_whisper_vram() -> None:
-    """Выгружает whisper-модель из VRAM и переносит pyannote на CUDA.
-
-    Вызывается после транскрипции: whisper больше не нужен, освобождаем ~3 ГБ
-    VRAM чтобы pyannote.audio мог работать на GPU вместо CPU.
-    На CPU диаризация 30 мин аудио занимает ~50 мин; на CUDA — ~40 сек.
-    """
-    import gc
-    try:
-        import torch
-        import app.transcription.faster_whisper_backend as _fw
-        _fw._model = None
-        gc.collect()
-        # Не вызываем torch.cuda.empty_cache(): ctranslate2 держит собственный
-        # CUDA-контекст отдельно от PyTorch, вызов empty_cache() в момент его
-        # деструкции вызывает SIGABRT. gc.collect() достаточно.
-        # Если pyannote уже загружен (предыдущая сессия) — переносим на CUDA
-        from app.diarization.pyannote_diarizer import move_to_cuda
-        move_to_cuda()
-    except Exception:
-        pass  # не ломаем пайплайн если что-то пошло не так
-
-
 # ── Выравнивание транскрипции и диаризации ────────────────────────────────────
 
 def _assign_speakers(
@@ -249,18 +224,10 @@ def run_transcription(
             _progress("error", "Нет аудиофайлов")
             return None
 
-        _progress("transcribing")
-        backend = get_backend()
-
-        def _on_transcribe_progress(current: float, total: float) -> None:
-            _progress("transcribing", f"{current:.0f}/{total:.0f}")
-
-        transcription = backend.transcribe(merged, on_progress=_on_transcribe_progress)
-        _check_cancel()
-
-        # Whisper больше не нужен — освобождаем VRAM для pyannote.
-        _free_whisper_vram()
-
+        # Диаризация идёт ПЕРВОЙ пока VRAM свободна — pyannote грузится на CUDA.
+        # Потом whisper загружается следом и они сосуществуют в VRAM (~5 ГБ суммарно).
+        # Попытка выгрузить ctranslate2 (whisper) вручную вызывает SIGABRT:
+        # его CUDA-деструктор несовместим с живым PyTorch-контекстом.
         cached = _load_diarization_cache(diar_cache_path)
         if cached is not None:
             diarization = cached
@@ -269,6 +236,15 @@ def run_transcription(
             diarizer = PyannoteDiarizer()
             diarization = diarizer.diarize(merged)
             _save_diarization_cache(diar_cache_path, diarization)
+        _check_cancel()
+
+        _progress("transcribing")
+        backend = get_backend()
+
+        def _on_transcribe_progress(current: float, total: float) -> None:
+            _progress("transcribing", f"{current:.0f}/{total:.0f}")
+
+        transcription = backend.transcribe(merged, on_progress=_on_transcribe_progress)
         _check_cancel()
 
         _progress("aligning")

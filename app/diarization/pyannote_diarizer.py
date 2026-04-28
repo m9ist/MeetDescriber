@@ -49,25 +49,6 @@ def _get_pipeline():
     return _pipeline
 
 
-def move_to_cuda() -> None:
-    """Переносит уже загруженный pipeline на CUDA.
-
-    Вызывается из pipeline.py после того, как whisper выгружен из VRAM.
-    Если pipeline ещё не загружен — ничего не делает: _get_pipeline() сам
-    выберет CUDA при первой загрузке.
-    """
-    global _pipeline, _pipeline_lock
-    if _pipeline is None:
-        return
-    import torch
-    if not torch.cuda.is_available():
-        return
-    import threading
-    if _pipeline_lock is None:
-        _pipeline_lock = threading.Lock()
-    with _pipeline_lock:
-        if _pipeline is not None:
-            _pipeline.to(torch.device("cuda"))
 
 
 def _load_wav_as_tensor(path: Path):
