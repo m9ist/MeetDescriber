@@ -189,7 +189,7 @@ class ForMeetsTray:
                     self._job_label(j),
                     self._make_done_submenu(j),
                 )
-                for j in self._done_jobs[-10:]
+                for j in self._done_jobs[:10]
             ]
             items.append(pystray.MenuItem(
                 f"Обработанные ({len(self._done_jobs)})",
