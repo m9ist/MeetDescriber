@@ -25,6 +25,7 @@ from typing import Callable, Optional
 import config
 
 log = logging.getLogger("app")
+
 from app.storage.db import get_conn
 from app.storage import file_manager
 from app.transcription.backend import get_backend, TranscriptionResult
@@ -33,6 +34,33 @@ from app.diarization.pyannote_diarizer import PyannoteDiarizer, DiarizationSegme
 
 class PipelineCancelledError(Exception):
     pass
+
+
+# ── Приоритет потока ──────────────────────────────────────────────────────────
+
+def _set_thread_priority_below_normal() -> int:
+    """Выставляет приоритет текущего потока на BELOW_NORMAL (Windows).
+    Возвращает предыдущий приоритет для последующего восстановления.
+    На не-Windows платформах — no-op, возвращает 0.
+    """
+    if not config.IS_WINDOWS:
+        return 0
+    import ctypes
+    THREAD_PRIORITY_BELOW_NORMAL = -1
+    kernel32 = ctypes.windll.kernel32
+    h = kernel32.GetCurrentThread()
+    prev = kernel32.GetThreadPriority(h)
+    kernel32.SetThreadPriority(h, THREAD_PRIORITY_BELOW_NORMAL)
+    return prev
+
+
+def _restore_thread_priority(prev: int) -> None:
+    if not config.IS_WINDOWS:
+        return
+    import ctypes
+    ctypes.windll.kernel32.SetThreadPriority(
+        ctypes.windll.kernel32.GetCurrentThread(), prev
+    )
 
 
 # ── Выравнивание транскрипции и диаризации ────────────────────────────────────
@@ -243,8 +271,12 @@ def run_transcription(
             _progress("diarizing")
             t0 = time.monotonic()
             log.info("pipeline diarize start")
-            diarizer = PyannoteDiarizer()
-            diarization = diarizer.diarize(merged)
+            _prev_priority = _set_thread_priority_below_normal()
+            try:
+                diarizer = PyannoteDiarizer()
+                diarization = diarizer.diarize(merged)
+            finally:
+                _restore_thread_priority(_prev_priority)
             _save_diarization_cache(diar_cache_path, diarization)
             log.info("pipeline diarize done  %.1f s  %d segments", time.monotonic() - t0, len(diarization))
         _check_cancel()
