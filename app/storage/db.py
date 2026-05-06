@@ -68,6 +68,22 @@ def init_db() -> None:
             "UPDATE jobs SET status='pending', updated_at=datetime('now') WHERE status='processing'"
         )
 
+        # Миграции: добавляем новые колонки если их нет
+        existing_jobs = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        for col, ddl in [
+            ("transcribe_duration_sec", "ALTER TABLE jobs ADD COLUMN transcribe_duration_sec REAL"),
+            ("diarize_duration_sec",    "ALTER TABLE jobs ADD COLUMN diarize_duration_sec REAL"),
+            ("analyze_duration_sec",    "ALTER TABLE jobs ADD COLUMN analyze_duration_sec REAL"),
+            ("followup_duration_sec",   "ALTER TABLE jobs ADD COLUMN followup_duration_sec REAL"),
+            ("dismissed",               "ALTER TABLE jobs ADD COLUMN dismissed INTEGER DEFAULT 0"),
+        ]:
+            if col not in existing_jobs:
+                conn.execute(ddl)
+
+        existing_sessions = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "ended_at" not in existing_sessions:
+            conn.execute("ALTER TABLE sessions ADD COLUMN ended_at TEXT")
+
 
 def db_exists() -> bool:
     return Path(config.DB_PATH).exists()

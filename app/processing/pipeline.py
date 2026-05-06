@@ -279,7 +279,13 @@ def run_transcription(
             finally:
                 _restore_thread_priority(_prev_priority)
             _save_diarization_cache(diar_cache_path, diarization)
-            log.info("pipeline diarize done  %.1f s  %d segments", time.monotonic() - t0, len(diarization))
+            _diarize_sec = time.monotonic() - t0
+            log.info("pipeline diarize done  %.1f s  %d segments", _diarize_sec, len(diarization))
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE jobs SET diarize_duration_sec=? WHERE id=?",
+                    (_diarize_sec, job_id),
+                )
         _check_cancel()
 
         _progress("transcribing")
@@ -295,8 +301,9 @@ def run_transcription(
             transcription = backend.transcribe(merged, on_progress=_on_transcribe_progress)
         finally:
             _restore_thread_priority(_prev_priority)
+        _transcribe_sec = time.monotonic() - t0
         log.info("pipeline transcribe done  %.1f s  duration=%.1f s  %d segments",
-                 time.monotonic() - t0, transcription.duration, len(transcription.segments))
+                 _transcribe_sec, transcription.duration, len(transcription.segments))
         _check_cancel()
 
         _progress("aligning")
@@ -323,8 +330,8 @@ def run_transcription(
         with get_conn() as conn:
             conn.execute(
                 "UPDATE jobs SET transcription_path=?, status='transcribed', "
-                "updated_at=datetime('now') WHERE id=?",
-                (str(doc_paths["transcription"]), job_id),
+                "transcribe_duration_sec=?, updated_at=datetime('now') WHERE id=?",
+                (str(doc_paths["transcription"]), _transcribe_sec, job_id),
             )
         log.info("pipeline transcription saved  → %s", doc_paths["transcription"])
 
@@ -346,12 +353,14 @@ def run_transcription(
             prompt_path=doc_paths["analysis_prompt"],
             ask_claude=ask_claude,
         )
+        _analyze_sec = time.monotonic() - t0
         with get_conn() as conn:
             conn.execute(
-                "UPDATE jobs SET analysis_path=?, status='analyzed', updated_at=datetime('now') WHERE id=?",
-                (str(doc_paths["analysis"]), job_id),
+                "UPDATE jobs SET analysis_path=?, status='analyzed', "
+                "analyze_duration_sec=?, updated_at=datetime('now') WHERE id=?",
+                (str(doc_paths["analysis"]), _analyze_sec, job_id),
             )
-        log.info("pipeline analysis done  %.1f s  → %s", time.monotonic() - t0, doc_paths["analysis"])
+        log.info("pipeline analysis done  %.1f s  → %s", _analyze_sec, doc_paths["analysis"])
 
     # ── Этап 5б: follow-up ────────────────────────────────────────────────────
     _check_cancel()
@@ -370,12 +379,14 @@ def run_transcription(
             prompt_path=doc_paths["followup_prompt"],
             ask_claude=ask_claude,
         )
+        _followup_sec = time.monotonic() - t0
         with get_conn() as conn:
             conn.execute(
-                "UPDATE jobs SET followup_path=?, updated_at=datetime('now') WHERE id=?",
-                (str(doc_paths["followup"]), job_id),
+                "UPDATE jobs SET followup_path=?, followup_duration_sec=?, "
+                "updated_at=datetime('now') WHERE id=?",
+                (str(doc_paths["followup"]), _followup_sec, job_id),
             )
-        log.info("pipeline followup done  %.1f s  → %s", time.monotonic() - t0, doc_paths["followup"])
+        log.info("pipeline followup done  %.1f s  → %s", _followup_sec, doc_paths["followup"])
 
     _set_job_status(job_id, "done")
     _progress("done")
