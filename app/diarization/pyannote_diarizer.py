@@ -41,9 +41,12 @@ def _get_pipeline():
             _pipeline = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-3.1",
             )
-            # Принудительно CPU: pyannote (~2 GB) + whisper-large-v3 (~6 GB)
-            # не помещаются вместе в VRAM. Whisper грузится на CUDA отдельно.
-            _pipeline.to(torch.device("cpu"))
+            # Грузим на CUDA если доступна, иначе CPU.
+            # Диаризация идёт до транскрипции (до загрузки whisper),
+            # поэтому VRAM свободна. pyannote (~2 GB) + whisper-large-v3 (~6 GB)
+            # суммарно ~8 GB — умещается на 12 GB картах.
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            _pipeline.to(torch.device(device))
     return _pipeline
 
 
