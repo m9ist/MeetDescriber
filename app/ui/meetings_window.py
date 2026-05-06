@@ -132,7 +132,7 @@ class MeetingsWindow:
         table_frame = tk.Frame(win)
         table_frame.pack(fill="both", expand=True, padx=8, pady=4)
 
-        columns = ("date", "title", "duration", "status")
+        columns = ("date", "title", "duration", "status", "audio")
         self._tree = ttk.Treeview(
             table_frame,
             columns=columns,
@@ -143,11 +143,13 @@ class MeetingsWindow:
         self._tree.heading("title", text="Название")
         self._tree.heading("duration", text="Длительность")
         self._tree.heading("status", text="Статус")
+        self._tree.heading("audio", text="Аудио")
 
         self._tree.column("date", width=130, minwidth=120, stretch=False)
-        self._tree.column("title", width=400, minwidth=150, stretch=True)
+        self._tree.column("title", width=370, minwidth=150, stretch=True)
         self._tree.column("duration", width=100, minwidth=80, stretch=False)
         self._tree.column("status", width=150, minwidth=100, stretch=False)
+        self._tree.column("audio", width=55, minwidth=50, stretch=False, anchor="center")
 
         vsb = ttk.Scrollbar(table_frame, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=vsb.set)
@@ -207,11 +209,13 @@ class MeetingsWindow:
             title = m.get("title") or "Без названия"
             duration = _fmt_duration(m.get("duration_sec"))
             status = STATUS_RU.get(m.get("status") or "", m.get("status") or "—")
+            audio_dir = config.RECORDINGS_DIR / f"session_{session_id}"
+            audio = "✓" if audio_dir.exists() and any(audio_dir.iterdir()) else ""
             self._tree.insert(
                 "",
                 "end",
                 iid=str(session_id),
-                values=(date_str, title, duration, status),
+                values=(date_str, title, duration, status, audio),
             )
 
     def _update_stats(self) -> None:
