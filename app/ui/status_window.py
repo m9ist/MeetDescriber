@@ -166,6 +166,14 @@ class ProcessingStatusWindow:
         if not self._win or not self._win.winfo_exists():
             return
 
+        # На стадиях LLM пользователь работает с ClaudeManualDialog —
+        # статус-окно дублирует его и мешает. Прячем его на время.
+        if stage in ("analysis", "followup"):
+            self._win.withdraw()
+            return
+        else:
+            self._win.deiconify()
+
         label = _STAGE_LABELS.get(stage, stage)
         self._stage_var.set(label)
         self._spinning = stage not in ("done", "error")
