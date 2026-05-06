@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import logging
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,8 @@ from pathlib import Path
 import warnings
 
 import config
+
+log = logging.getLogger("app")
 
 
 @dataclass
@@ -46,7 +49,12 @@ def _get_pipeline():
             # поэтому VRAM свободна. pyannote (~2 GB) + whisper-large-v3 (~6 GB)
             # суммарно ~8 GB — умещается на 12 GB картах.
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            _pipeline.to(torch.device(device))
+            try:
+                _pipeline.to(torch.device(device))
+                log.info("pyannote loaded on %s", device)
+            except Exception:
+                log.error("pyannote failed to move to %s", device, exc_info=True)
+                raise  # TODO: показать попап пользователю, убрать raise
     return _pipeline
 
 
