@@ -185,6 +185,7 @@ class ClaudeManualDialog:
         chat_prompt: str = "",
         output_path: Optional[Path] = None,
     ) -> None:
+        self._stage = stage
         self._prompt_path = prompt_path
         self._cli = cli
         self._queue = result_queue
@@ -325,12 +326,16 @@ class ClaudeManualDialog:
                     except OSError:
                         pass
                 if r.returncode == 0:
+                    stdout = r.stdout.decode("utf-8", errors="replace").strip()
+                    if stdout:
+                        log.info("claude stdout [%s]:\n%s", self._stage, stdout)
                     # Claude записал файл сам через Write/Edit.
                     # Отправляем STAGE_DONE — pipeline не перезаписывает файл stdout-ом.
                     self._queue.put(self.STAGE_DONE)
                     self._win.after(0, self._win.destroy)
                 else:
                     err = r.stderr.decode("utf-8", errors="replace")[:200]
+                    log.error("claude failed [%s] rc=%d stderr: %s", self._stage, r.returncode, err)
                     self._win.after(0, lambda: self._run_failed(f"rc={r.returncode}: {err}"))
             except Exception as e:
                 self._win.after(0, lambda: self._run_failed(str(e)))
