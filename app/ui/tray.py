@@ -78,6 +78,7 @@ class ForMeetsTray:
         on_edit_job: Callable[[int], None] = None,
         on_delete_job: Callable[[int], None] = None,
         on_delete_all_pending: Callable[[], None] = None,
+        on_dismiss_job: Callable[[int], None] = None,
     ) -> None:
         self._on_start_manual = on_start_manual
         self._on_stop = on_stop
@@ -86,6 +87,7 @@ class ForMeetsTray:
         self._on_edit_job = on_edit_job
         self._on_delete_job = on_delete_job
         self._on_delete_all_pending = on_delete_all_pending
+        self._on_dismiss_job = on_dismiss_job
 
         self._recording = False
         self._status_text = "Ожидание"
@@ -161,7 +163,7 @@ class ForMeetsTray:
         if self._pending_jobs:
             pending_items = [
                 pystray.MenuItem(
-                    self._job_label(j),
+                    self._job_label(j, context="pending"),
                     self._make_pending_submenu(j),
                 )
                 for j in self._pending_jobs
@@ -186,7 +188,7 @@ class ForMeetsTray:
         if self._done_jobs:
             done_items = [
                 pystray.MenuItem(
-                    self._job_label(j),
+                    self._job_label(j, context="done"),
                     self._make_done_submenu(j),
                 )
                 for j in self._done_jobs[:10]
@@ -210,17 +212,20 @@ class ForMeetsTray:
         return pystray.Menu(*items)
 
     @staticmethod
-    def _job_label(job: dict) -> str:
+    def _job_label(job: dict, context: str = "pending") -> str:
         title = job.get("title") or "Без названия"
         dt = (job.get("started_at") or "")
         date = dt[:10]
         time = dt[11:16]
         label_dt = f"{date} {time}" if time else date
-        status = job.get("status")
-        if status == "transcribed":
-            suffix = " → анализ"
-        elif status == "analyzed":
-            suffix = " → follow-up"
+        if context == "pending":
+            status = job.get("status")
+            if status == "transcribed":
+                suffix = " → анализ"
+            elif status == "analyzed":
+                suffix = " → follow-up"
+            else:
+                suffix = ""
         else:
             suffix = ""
         return f"{label_dt}  {title}{suffix}"
@@ -280,6 +285,10 @@ class ForMeetsTray:
             if self._on_delete_job:
                 self._on_delete_job(job_id)
 
+        def dismiss(icon, item):
+            if self._on_dismiss_job:
+                self._on_dismiss_job(job_id)
+
         status = job.get("status", "pending")
         if status == "analyzed":
             action_label = "Запустить follow-up"
@@ -311,6 +320,7 @@ class ForMeetsTray:
                 enabled=bool(an and Path(an).exists()),
             ),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Скрыть из списка", dismiss),
             pystray.MenuItem("Удалить", delete),
         )
 

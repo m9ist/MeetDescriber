@@ -103,6 +103,7 @@ class App:
             on_edit_job=self._on_edit_job,
             on_delete_job=self._on_delete_job,
             on_delete_all_pending=self._on_delete_all_pending,
+            on_dismiss_job=self._on_dismiss_job,
         )
 
         # Native host thread
@@ -491,13 +492,20 @@ class App:
                 self._delete_job_files(conn, job_id)
         self._refresh_tray_jobs()
 
+    def _on_dismiss_job(self, job_id: int) -> None:
+        """Скрывает задание из «Необработанных» — устанавливает dismissed=1."""
+        from app.storage.meetings_repo import set_dismissed
+        set_dismissed(job_id, True)
+        log.info("dismissed job %d", job_id)
+        self._refresh_tray_jobs()
+
     def _refresh_tray_jobs(self) -> None:
         with get_conn() as conn:
             pending_rows = conn.execute("""
                 SELECT j.id, j.status, j.transcription_path, j.analysis_path,
                        s.title, s.started_at
                 FROM jobs j JOIN sessions s ON s.id = j.session_id
-                WHERE j.status IN ('pending', 'transcribed', 'analyzed')
+                WHERE j.status IN ('pending', 'transcribed', 'analyzed') AND j.dismissed = 0
                 ORDER BY j.created_at DESC
             """).fetchall()
 
@@ -505,7 +513,7 @@ class App:
                 SELECT j.id, j.status, j.session_id, j.transcription_path, j.analysis_path, j.followup_path,
                        s.title, s.started_at
                 FROM jobs j JOIN sessions s ON s.id = j.session_id
-                WHERE j.status = 'done'
+                WHERE j.status = 'done' OR j.dismissed = 1
                 ORDER BY j.updated_at DESC
                 LIMIT 20
             """).fetchall()
