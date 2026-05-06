@@ -494,7 +494,8 @@ class App:
     def _refresh_tray_jobs(self) -> None:
         with get_conn() as conn:
             pending_rows = conn.execute("""
-                SELECT j.id, j.status, s.title, s.started_at
+                SELECT j.id, j.status, j.transcription_path, j.analysis_path,
+                       s.title, s.started_at
                 FROM jobs j JOIN sessions s ON s.id = j.session_id
                 WHERE j.status IN ('pending', 'transcribed', 'analyzed')
                 ORDER BY j.created_at DESC
@@ -514,6 +515,8 @@ class App:
             "status": r["status"],
             "title": r["title"],
             "started_at": r["started_at"],
+            "transcription_path": r["transcription_path"],
+            "analysis_path": r["analysis_path"],
         }
         done_to_dict = lambda r: {
             "id": r["id"],
