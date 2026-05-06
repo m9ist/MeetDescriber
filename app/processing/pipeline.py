@@ -289,7 +289,11 @@ def run_transcription(
         def _on_transcribe_progress(current: float, total: float) -> None:
             _progress("transcribing", f"{current:.0f}/{total:.0f}")
 
-        transcription = backend.transcribe(merged, on_progress=_on_transcribe_progress)
+        _prev_priority = _set_thread_priority_below_normal()
+        try:
+            transcription = backend.transcribe(merged, on_progress=_on_transcribe_progress)
+        finally:
+            _restore_thread_priority(_prev_priority)
         log.info("pipeline transcribe done  %.1f s  duration=%.1f s  %d segments",
                  time.monotonic() - t0, transcription.duration, len(transcription.segments))
         _check_cancel()
