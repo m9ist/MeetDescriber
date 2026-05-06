@@ -359,7 +359,8 @@ class ClaudeManualDialog:
         cwd = str(config.ROOT_DIR)
         try:
             if config.IS_WINDOWS:
-                subprocess.Popen(["cmd.exe"], cwd=cwd)
+                subprocess.Popen(["cmd.exe"], cwd=cwd,
+                                 creationflags=subprocess.CREATE_NEW_CONSOLE)
             else:
                 subprocess.Popen(["open", "-a", "Terminal", cwd])
         except Exception as e:
