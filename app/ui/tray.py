@@ -12,6 +12,7 @@
   - ──────────────────
   - Выход
 """
+import ctypes
 import os
 import subprocess
 import threading
@@ -22,6 +23,10 @@ import pystray
 from PIL import Image, ImageDraw
 
 import config
+
+# Custom Win32 message: posted from any thread to trigger refresh on pystray thread.
+# WM_USER = 0x0400; +100 keeps us far from any pystray internals.
+_WM_TRAY_REFRESH = 0x0400 + 100
 
 
 def _open_path(path: str) -> None:
@@ -97,6 +102,7 @@ class ForMeetsTray:
         self._done_jobs: list[dict] = []
 
         self._icon: Optional[pystray.Icon] = None
+        self._icon_hwnd: Optional[int] = None  # Win32 HWND; set after pystray is running
 
     # ── Публичные методы (потокобезопасны) ───────────────────────────────────
 
@@ -142,9 +148,39 @@ class ForMeetsTray:
             "for_meets",
             menu=self._build_menu(),
         )
-        self._icon.run()
+
+        # Register a custom Win32 message handler so any thread can trigger a
+        # refresh on the pystray thread by PostMessage-ing _WM_TRAY_REFRESH.
+        # _message_handlers is a plain dict set up in pystray._win32.Icon.__init__
+        # and read inside _mainloop — safe to extend before run() is called.
+        self._icon._message_handlers[_WM_TRAY_REFRESH] = \
+            lambda wparam, lparam: self._do_refresh()
+
+        def _setup(icon: pystray.Icon) -> None:
+            icon.visible = True
+            # HWND is created before _mark_ready() signals this thread, so it
+            # is valid here.  Store it so _refresh() can PostMessage from any
+            # thread without races.
+            self._icon_hwnd = icon._hwnd
+
+        self._icon.run(setup=_setup)
 
     def _refresh(self) -> None:
+        """Thread-safe refresh dispatcher.
+
+        On Windows, once the icon HWND is available, posts _WM_TRAY_REFRESH so
+        the update runs on the pystray thread (which owns the HWND and the
+        HMENU).  Before the icon is running, or on macOS, falls through to a
+        direct call.
+        """
+        if config.IS_WINDOWS and self._icon_hwnd:
+            ctypes.windll.user32.PostMessageW(
+                self._icon_hwnd, _WM_TRAY_REFRESH, 0, 0)
+        elif self._icon:
+            self._do_refresh()
+
+    def _do_refresh(self) -> None:
+        """Actual pystray update — must run on the pystray thread (Windows)."""
         if self._icon:
             self._icon.icon = _make_icon(self._recording)
             self._icon.title = f"for_meets — {self._status_text}"
