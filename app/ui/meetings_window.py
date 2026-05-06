@@ -264,6 +264,9 @@ class MeetingsWindow:
         def state(path) -> str:
             return "normal" if path and Path(path).exists() else "disabled"
 
+        audio_dir = config.RECORDINGS_DIR / f"session_{session_id}"
+        has_audio = audio_dir.exists() and any(audio_dir.iterdir())
+
         menu = tk.Menu(self._win, tearoff=0)
         menu.add_command(
             label="Открыть транскрипцию",
@@ -288,6 +291,7 @@ class MeetingsWindow:
         menu.add_separator()
         menu.add_command(
             label="Перезапустить транскрипцию",
+            state="normal" if has_audio else "disabled",
             command=lambda: self._restart_stage(job_id, "transcription"),
         )
         menu.add_command(
@@ -299,14 +303,10 @@ class MeetingsWindow:
             command=lambda: self._restart_stage(job_id, "followup"),
         )
         menu.add_separator()
-        audio_state = (
-            "normal"
-            if status in ("transcribed", "analyzed", "done")
-            else "disabled"
-        )
+        can_delete_audio = has_audio and status in ("transcribed", "analyzed", "done")
         menu.add_command(
             label="Удалить аудио",
-            state=audio_state,
+            state="normal" if can_delete_audio else "disabled",
             command=lambda: self._delete_audio(session_id),
         )
         menu.add_command(
