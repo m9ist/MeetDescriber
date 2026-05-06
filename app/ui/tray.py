@@ -288,8 +288,29 @@ class ForMeetsTray:
         else:
             action_label = "Обработать"
 
+        def make_open_file(path_str):
+            def handler(icon, item):
+                if path_str and Path(path_str).exists():
+                    _open_path(path_str)
+            return handler
+
+        tr = job.get("transcription_path")
+        an = job.get("analysis_path")
+
         return pystray.Menu(
             pystray.MenuItem(action_label, process),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(
+                "Транскрипция",
+                make_open_file(tr),
+                enabled=bool(tr and Path(tr).exists()),
+            ),
+            pystray.MenuItem(
+                "Анализ",
+                make_open_file(an),
+                enabled=bool(an and Path(an).exists()),
+            ),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem("Удалить", delete),
         )
 
