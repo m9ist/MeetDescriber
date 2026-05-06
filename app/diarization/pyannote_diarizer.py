@@ -29,6 +29,20 @@ _pipeline = None
 _pipeline_lock = None
 
 
+def unload() -> None:
+    """Выгружает pipeline из памяти (VRAM + RAM). Потокобезопасно."""
+    global _pipeline
+    import gc
+    import torch
+    if _pipeline_lock is None:
+        return
+    with _pipeline_lock:
+        _pipeline = None
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def _get_pipeline():
     global _pipeline, _pipeline_lock
     import threading

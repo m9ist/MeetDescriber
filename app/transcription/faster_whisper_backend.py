@@ -18,6 +18,18 @@ _model = None
 _model_lock = None
 
 
+def unload() -> None:
+    """Выгружает модель из памяти (VRAM + RAM). Потокобезопасно."""
+    global _model
+    import gc
+    import threading
+    if _model_lock is None:
+        return
+    with _model_lock:
+        _model = None
+    gc.collect()
+
+
 def _get_model():
     global _model, _model_lock
     import threading

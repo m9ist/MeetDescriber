@@ -57,3 +57,13 @@ def get_backend() -> TranscriptionBackend:
     else:
         from app.transcription.faster_whisper_backend import FasterWhisperBackend
         return FasterWhisperBackend()
+
+
+def unload_model() -> None:
+    """Выгружает модель транскрипции из памяти."""
+    if config.IS_MAC:
+        from app.transcription import mlx_whisper_backend
+        mlx_whisper_backend.unload()
+    else:
+        from app.transcription import faster_whisper_backend
+        faster_whisper_backend.unload()

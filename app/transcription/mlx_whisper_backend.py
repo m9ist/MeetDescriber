@@ -14,6 +14,11 @@ from app.transcription.backend import (
 )
 
 
+def unload() -> None:
+    """No-op: mlx-whisper не кэширует модель между вызовами."""
+    pass
+
+
 class MLXWhisperBackend(TranscriptionBackend):
 
     def transcribe(self, audio_path: Path, on_progress=None) -> TranscriptionResult:
