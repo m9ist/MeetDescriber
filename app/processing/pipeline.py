@@ -15,12 +15,16 @@ Post-processing пайплайн.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
 import config
+
+log = logging.getLogger("app")
 from app.storage.db import get_conn
 from app.storage import file_manager
 from app.transcription.backend import get_backend, TranscriptionResult
@@ -210,49 +214,64 @@ def run_transcription(
 
     diar_cache_path = session_dir / "diarization.json"
 
+    log.info("pipeline start  job=%d session=%d title=%r", job_id, session_id, title)
+
     # ── Этап 2: транскрипция + диаризация ────────────────────────────────────
     job = dict(job)  # sqlite3.Row → dict для .get()
 
     if job.get("transcription_path") and Path(job["transcription_path"]).exists():
-        # Уже сделано — пропускаем
-        pass
+        log.info("pipeline skip transcription — already done")
     else:
         _set_job_status(job_id, "processing")
+        t0 = time.monotonic()
         merged = file_manager.merge_chunks(session_dir)
         if not merged:
             _set_job_status(job_id, "error", "Нет аудиофайлов в сессии")
             _progress("error", "Нет аудиофайлов")
             return None
+        log.info("pipeline merge  %.1f s  → %s", time.monotonic() - t0, merged)
 
         # Диаризация идёт ПЕРВОЙ пока VRAM свободна — pyannote грузится на CUDA.
-        # Потом whisper загружается следом и они сосуществуют в VRAM (~5 ГБ суммарно).
+        # Потом whisper загружается следом и они сосуществуют в VRAM (~8 ГБ суммарно).
         # Попытка выгрузить ctranslate2 (whisper) вручную вызывает SIGABRT:
         # его CUDA-деструктор несовместим с живым PyTorch-контекстом.
         cached = _load_diarization_cache(diar_cache_path)
         if cached is not None:
+            log.info("pipeline diarize — cache hit (%d segments)", len(cached))
             diarization = cached
         else:
             _progress("diarizing")
+            t0 = time.monotonic()
+            log.info("pipeline diarize start")
             diarizer = PyannoteDiarizer()
             diarization = diarizer.diarize(merged)
             _save_diarization_cache(diar_cache_path, diarization)
+            log.info("pipeline diarize done  %.1f s  %d segments", time.monotonic() - t0, len(diarization))
         _check_cancel()
 
         _progress("transcribing")
+        t0 = time.monotonic()
+        log.info("pipeline transcribe start")
         backend = get_backend()
 
         def _on_transcribe_progress(current: float, total: float) -> None:
             _progress("transcribing", f"{current:.0f}/{total:.0f}")
 
         transcription = backend.transcribe(merged, on_progress=_on_transcribe_progress)
+        log.info("pipeline transcribe done  %.1f s  duration=%.1f s  %d segments",
+                 time.monotonic() - t0, transcription.duration, len(transcription.segments))
         _check_cancel()
 
         _progress("aligning")
+        t0 = time.monotonic()
         aligned = _assign_speakers(transcription, diarization)
+        log.info("pipeline align done  %.1f s", time.monotonic() - t0)
 
         saved_names = _load_saved_speakers(session_id)
         detected_names = _detect_names(aligned)
         speaker_map = _build_speaker_map(aligned, detected_names, saved_names)
+        log.info("pipeline speakers  detected=%s  saved=%s  final=%s",
+                 list(detected_names.values()), list(saved_names.values()), list(speaker_map.values()))
         _save_speakers(session_id, speaker_map)
 
         file_manager.write_transcription_md(
@@ -270,13 +289,16 @@ def run_transcription(
                 "updated_at=datetime('now') WHERE id=?",
                 (str(doc_paths["transcription"]), job_id),
             )
+        log.info("pipeline transcription saved  → %s", doc_paths["transcription"])
 
     # ── Этап 5а: анализ ───────────────────────────────────────────────────────
     _check_cancel()
     if job.get("analysis_path") and Path(job["analysis_path"]).exists():
-        pass
+        log.info("pipeline skip analysis — already done")
     else:
         _progress("analysis")
+        t0 = time.monotonic()
+        log.info("pipeline analysis start")
         from app.processing.analysis import write_analysis_md
         write_analysis_md(
             path=doc_paths["analysis"],
@@ -292,13 +314,16 @@ def run_transcription(
                 "UPDATE jobs SET analysis_path=?, status='analyzed', updated_at=datetime('now') WHERE id=?",
                 (str(doc_paths["analysis"]), job_id),
             )
+        log.info("pipeline analysis done  %.1f s  → %s", time.monotonic() - t0, doc_paths["analysis"])
 
     # ── Этап 5б: follow-up ────────────────────────────────────────────────────
     _check_cancel()
     if job.get("followup_path") and Path(job["followup_path"]).exists():
-        pass
+        log.info("pipeline skip followup — already done")
     else:
         _progress("followup")
+        t0 = time.monotonic()
+        log.info("pipeline followup start")
         from app.processing.followup import write_followup_md
         write_followup_md(
             path=doc_paths["followup"],
@@ -313,9 +338,11 @@ def run_transcription(
                 "UPDATE jobs SET followup_path=?, updated_at=datetime('now') WHERE id=?",
                 (str(doc_paths["followup"]), job_id),
             )
+        log.info("pipeline followup done  %.1f s  → %s", time.monotonic() - t0, doc_paths["followup"])
 
     _set_job_status(job_id, "done")
     _progress("done")
+    log.info("pipeline done  job=%d", job_id)
     return doc_paths["transcription"]
 
 
