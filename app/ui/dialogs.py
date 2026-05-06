@@ -250,6 +250,13 @@ class ClaudeManualDialog:
             text="Скопировать промпт",
             command=self._on_copy_prompt,
             **_btn_kw,
+        ).pack(side="left", padx=(0, 6))
+
+        tk.Button(
+            btn_frame,
+            text="Открыть CMD",
+            command=self._on_open_cmd,
+            **_btn_kw,
         ).pack(side="left")
 
         # Кнопка "Этап выполнен" + "Пропустить"
@@ -347,6 +354,16 @@ class ClaudeManualDialog:
         self._win.clipboard_append(self._chat_prompt)
         self._set_status("Промпт скопирован в буфер обмена")
         self._set_status("Промпт скопирован в буфер обмена")
+
+    def _on_open_cmd(self) -> None:
+        cwd = str(config.ROOT_DIR)
+        try:
+            if config.IS_WINDOWS:
+                subprocess.Popen(["cmd.exe"], cwd=cwd)
+            else:
+                subprocess.Popen(["open", "-a", "Terminal", cwd])
+        except Exception as e:
+            self._set_status(f"Не удалось открыть терминал: {e}", error=True)
 
     def _on_stage_done(self) -> None:
         if self._output_path is None:
