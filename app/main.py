@@ -502,7 +502,10 @@ class App:
 
     def _on_open_meetings_window(self) -> None:
         from app.ui.meetings_window import MeetingsWindow
-        self._schedule(lambda: MeetingsWindow(self._root))
+        self._schedule(lambda: MeetingsWindow(
+            self._root,
+            on_data_changed=self._refresh_tray_jobs,
+        ))
 
     def _refresh_tray_jobs(self) -> None:
         with get_conn() as conn:

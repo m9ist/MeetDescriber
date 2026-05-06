@@ -72,8 +72,11 @@ def _fmt_date(started_at: Optional[str]) -> str:
 class MeetingsWindow:
     """Немодальное окно со списком всех совещаний."""
 
-    def __init__(self, parent: tk.Tk) -> None:
+    def __init__(self, parent: tk.Tk, on_data_changed=None) -> None:
+        """on_data_changed — коллбэк для обновления трея после изменений
+        (delete/restart/edit). Если None — трей не обновляется."""
         self._parent = parent
+        self._on_data_changed = on_data_changed
 
         win = tk.Toplevel(parent)
         win.title("for_meets — Все совещания")
@@ -187,6 +190,14 @@ class MeetingsWindow:
         )
         self._populate_table()
         self._update_stats()
+
+    def _notify_data_changed(self) -> None:
+        """Вызывается после действий, меняющих БД — чтобы обновить трей."""
+        if self._on_data_changed:
+            try:
+                self._on_data_changed()
+            except Exception:
+                log.exception("on_data_changed callback failed")
 
     def _populate_table(self) -> None:
         self._tree.delete(*self._tree.get_children())
@@ -335,6 +346,7 @@ class MeetingsWindow:
             messagebox.showerror("Ошибка", f"Не удалось сохранить:\n{e}", parent=self._win)
             return
         self._reload_meetings()
+        self._notify_data_changed()
 
     def _restart_stage(self, job_id: Optional[int], stage: str) -> None:
         if job_id is None:
@@ -359,6 +371,7 @@ class MeetingsWindow:
             messagebox.showerror("Ошибка", str(e), parent=self._win)
             return
         self._reload_meetings()
+        self._notify_data_changed()
 
     def _delete_audio(self, session_id: int) -> None:
         if not messagebox.askyesno(
@@ -373,6 +386,7 @@ class MeetingsWindow:
             messagebox.showerror("Ошибка", str(e), parent=self._win)
             return
         self._reload_meetings()
+        self._notify_data_changed()
 
     def _delete_meeting(self, session_id: int, title: str) -> None:
         if not messagebox.askyesno(
@@ -388,6 +402,7 @@ class MeetingsWindow:
             messagebox.showerror("Ошибка", str(e), parent=self._win)
             return
         self._reload_meetings()
+        self._notify_data_changed()
 
     # ── Кнопка удаления старого аудио ────────────────────────────────────────
 
@@ -422,6 +437,7 @@ class MeetingsWindow:
 
         messagebox.showinfo("Готово", f"Удалено {deleted} папок.", parent=self._win)
         self._reload_meetings()
+        self._notify_data_changed()
 
     # ── Tooltip ───────────────────────────────────────────────────────────────
 
