@@ -192,7 +192,7 @@ class ClaudeManualDialog:
         self._output_path = output_path
 
         win = tk.Toplevel(parent)
-        win.title(f"Claude CLI недоступен — {stage}")
+        win.title(f"for_meets — {stage}")
         win.resizable(False, False)
         win.attributes("-topmost", True)
         win.protocol("WM_DELETE_WINDOW", self._on_skip)
@@ -202,18 +202,28 @@ class ClaudeManualDialog:
 
         tk.Label(
             win,
-            text=f"Не удалось запустить claude для этапа «{stage}».",
+            text=f"Этап: {stage}",
             font=(config.UI_FONT, 10, "bold"),
+        ).pack(fill="x", **pad)
+
+        tk.Label(
+            win,
+            text="Запустите Claude CLI командой ниже, дождитесь завершения\n"
+                 "и нажмите «Этап выполнен». Или скопируйте промпт и выполните вручную.",
+            anchor="w",
+            justify="left",
+            wraplength=460,
+            fg="#555",
         ).pack(fill="x", **pad)
 
         if prompt_path:
             tk.Label(
                 win,
-                text=f"Промпт сохранён:\n{prompt_path}",
+                text=f"Промпт: {prompt_path}",
                 anchor="w",
                 justify="left",
                 wraplength=460,
-                fg="#555",
+                fg="#888",
             ).pack(fill="x", **pad)
 
         # Статус (обратная связь после нажатия кнопок)
@@ -315,8 +325,9 @@ class ClaudeManualDialog:
                     except OSError:
                         pass
                 if r.returncode == 0:
-                    text = r.stdout.decode("utf-8", errors="replace").strip()
-                    self._queue.put(text)
+                    # Claude записал файл сам через Write/Edit.
+                    # Отправляем STAGE_DONE — pipeline не перезаписывает файл stdout-ом.
+                    self._queue.put(self.STAGE_DONE)
                     self._win.after(0, self._win.destroy)
                 else:
                     err = r.stderr.decode("utf-8", errors="replace")[:200]
