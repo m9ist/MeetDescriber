@@ -79,6 +79,7 @@ class ForMeetsTray:
         on_delete_job: Callable[[int], None] = None,
         on_delete_all_pending: Callable[[], None] = None,
         on_dismiss_job: Callable[[int], None] = None,
+        on_open_meetings_window: Callable[[], None] = None,
     ) -> None:
         self._on_start_manual = on_start_manual
         self._on_stop = on_stop
@@ -88,6 +89,7 @@ class ForMeetsTray:
         self._on_delete_job = on_delete_job
         self._on_delete_all_pending = on_delete_all_pending
         self._on_dismiss_job = on_dismiss_job
+        self._on_open_meetings_window = on_open_meetings_window
 
         self._recording = False
         self._status_text = "Ожидание"
@@ -198,6 +200,10 @@ class ForMeetsTray:
                 pystray.Menu(*done_items),
             ))
 
+        items.append(pystray.MenuItem(
+            "Все совещания…",
+            self._handle_open_meetings_window,
+        ))
         items.append(pystray.Menu.SEPARATOR)
 
         # Запуск / остановка
@@ -338,6 +344,10 @@ class ForMeetsTray:
 
     def _handle_stop(self, icon, item) -> None:
         self._on_stop()
+
+    def _handle_open_meetings_window(self, icon, item) -> None:
+        if self._on_open_meetings_window:
+            self._on_open_meetings_window()
 
     def _handle_quit(self, icon, item) -> None:
         self._on_quit()

@@ -165,6 +165,32 @@ def delete_audio(session_id: int) -> None:
     _rmdir(session_dir)
 
 
+def count_old_audio(days: int) -> tuple[int, int]:
+    """
+    Считает папки с аудио для сессий старше `days` дней
+    у которых status IN ('transcribed', 'analyzed', 'done').
+
+    Возвращает (count, total_bytes).
+    """
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT s.id FROM sessions s
+               JOIN jobs j ON j.session_id = s.id
+               WHERE j.status IN ('transcribed', 'analyzed', 'done')
+                 AND s.started_at < datetime('now', ? || ' days')""",
+            (f"-{days}",),
+        ).fetchall()
+
+    count = 0
+    total_bytes = 0
+    for row in rows:
+        session_dir = config.RECORDINGS_DIR / f"session_{row[0]}"
+        if session_dir.exists():
+            count += 1
+            total_bytes += _dir_size(session_dir)
+    return count, total_bytes
+
+
 def delete_old_audio(days: int) -> int:
     """
     Удаляет папки с аудио для сессий старше `days` дней

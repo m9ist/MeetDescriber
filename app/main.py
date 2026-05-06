@@ -104,6 +104,7 @@ class App:
             on_delete_job=self._on_delete_job,
             on_delete_all_pending=self._on_delete_all_pending,
             on_dismiss_job=self._on_dismiss_job,
+            on_open_meetings_window=self._on_open_meetings_window,
         )
 
         # Native host thread
@@ -498,6 +499,10 @@ class App:
         set_dismissed(job_id, True)
         log.info("dismissed job %d", job_id)
         self._refresh_tray_jobs()
+
+    def _on_open_meetings_window(self) -> None:
+        from app.ui.meetings_window import MeetingsWindow
+        self._schedule(lambda: MeetingsWindow(self._root))
 
     def _refresh_tray_jobs(self) -> None:
         with get_conn() as conn:
