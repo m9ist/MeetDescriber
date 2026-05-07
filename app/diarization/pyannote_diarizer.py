@@ -58,12 +58,18 @@ def _get_pipeline():
             _pipeline = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-3.1",
             )
-            # Принудительно CPU: whisper-large-v3 уже занимает ~6 GB VRAM,
-            # а если предыдущий пайплайн упал до unload_model() — модель
-            # остаётся в памяти. Совместная загрузка на CUDA вызывает OOM-crash
-            # без Python-исключения (процесс убивается ОС/драйвером).
-            _pipeline.to(torch.device("cpu"))
-            log.info("pyannote loaded on cpu")
+            # Грузим на CUDA если доступна, иначе CPU.
+            # Диаризация идёт до транскрипции (до загрузки whisper),
+            # поэтому VRAM свободна. pyannote (~2 GB) + whisper-large-v3 (~6 GB)
+            # суммарно ~8 GB — умещается на 12 GB карте (RTX 3060 Ti / 4070 и т.п.).
+            # OOM при такой конфигурации исключён.
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            try:
+                _pipeline.to(torch.device(device))
+                log.info("pyannote loaded on %s", device)
+            except Exception:
+                log.error("pyannote failed to move to %s", device, exc_info=True)
+                raise
     return _pipeline
 
 
