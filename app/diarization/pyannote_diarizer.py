@@ -51,6 +51,10 @@ def _get_pipeline():
     with _pipeline_lock:
         if _pipeline is None:
             import torch
+            if torch.cuda.is_available():
+                free, total = torch.cuda.mem_get_info()
+                log.info("pyannote load: VRAM free %.1f GB / %.1f GB",
+                         free / 1e9, total / 1e9)
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message="torchcodec is not installed")
                 warnings.filterwarnings("ignore", category=UserWarning, module="torio")

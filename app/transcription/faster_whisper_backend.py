@@ -3,10 +3,13 @@
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Callable, Optional
 
 import config
+
+log = logging.getLogger("app")
 from app.transcription.backend import (
     TranscriptionBackend,
     TranscriptionResult,
@@ -40,6 +43,10 @@ def _get_model():
             from faster_whisper import WhisperModel
             import torch
             device = "cuda" if torch.cuda.is_available() else "cpu"
+            if torch.cuda.is_available():
+                free, total = torch.cuda.mem_get_info()
+                log.info("whisper load: VRAM free %.1f GB / %.1f GB",
+                         free / 1e9, total / 1e9)
             compute = "float16" if device == "cuda" else "int8"
             _model = WhisperModel(
                 config.WHISPER_MODEL,
