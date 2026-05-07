@@ -1,15 +1,21 @@
 """
 Транскрипция через faster-whisper (Windows + CUDA / CPU).
+
+Whisper запускается в отдельном subprocess чтобы изолировать ctranslate2
+от других CUDA-библиотек. Это устраняет SIGABRT при уничтожении модели
+в pipeline-треде (cudnn64_9.dll конфликт с PyTorch cuDNN).
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
+import subprocess
+import sys
+import threading
 from pathlib import Path
 from typing import Callable, Optional
 
-import config
-
-log = logging.getLogger("app")
 from app.transcription.backend import (
     TranscriptionBackend,
     TranscriptionResult,
@@ -17,43 +23,14 @@ from app.transcription.backend import (
     TranscriptionWord,
 )
 
-_model = None
-_model_lock = None
+log = logging.getLogger("app")
+
+_WORKER    = Path(__file__).parent / "transcribe_worker.py"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def unload() -> None:
-    """Выгружает модель из памяти (VRAM + RAM). Потокобезопасно."""
-    global _model
-    import gc
-    import threading
-    if _model_lock is None:
-        return
-    with _model_lock:
-        _model = None
-    gc.collect()
-
-
-def _get_model():
-    global _model, _model_lock
-    import threading
-    if _model_lock is None:
-        _model_lock = threading.Lock()
-    with _model_lock:
-        if _model is None:
-            from faster_whisper import WhisperModel
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            if torch.cuda.is_available():
-                free, total = torch.cuda.mem_get_info()
-                log.info("whisper load: VRAM free %.1f GB / %.1f GB",
-                         free / 1e9, total / 1e9)
-            compute = "float16" if device == "cuda" else "int8"
-            _model = WhisperModel(
-                config.WHISPER_MODEL,
-                device=device,
-                compute_type=compute,
-            )
-    return _model
+    """No-op: модель живёт в subprocess и выгружается вместе с ним."""
 
 
 class FasterWhisperBackend(TranscriptionBackend):
@@ -63,43 +40,54 @@ class FasterWhisperBackend(TranscriptionBackend):
         audio_path: Path,
         on_progress: Optional[Callable[[float, float], None]] = None,
     ) -> TranscriptionResult:
-        model = _get_model()
-
-        raw_segments, info = model.transcribe(
-            str(audio_path),
-            language=config.WHISPER_LANGUAGE,
-            word_timestamps=True,
-            vad_filter=True,
+        proc = subprocess.Popen(
+            [sys.executable, str(_WORKER), str(audio_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(_REPO_ROOT),
+            env=os.environ.copy(),
         )
 
-        total = info.duration or 0.0
-        segments: list[TranscriptionSegment] = []
-        for seg in raw_segments:
-            words = []
-            probs = []
-            if seg.words:
-                for w in seg.words:
-                    words.append(TranscriptionWord(
-                        start=w.start,
-                        end=w.end,
-                        word=w.word,
-                        probability=w.probability,
-                    ))
-                    probs.append(w.probability)
+        # stderr: PROGRESS:cur/total → on_progress; остальное → app.log
+        def _pipe_stderr() -> None:
+            for line in proc.stderr:
+                line = line.rstrip()
+                if line.startswith("PROGRESS:"):
+                    if on_progress:
+                        try:
+                            cur_s, total_s = line[9:].split("/")
+                            on_progress(float(cur_s), float(total_s))
+                        except ValueError:
+                            pass
+                else:
+                    log.debug("[transcribe_worker] %s", line)
 
-            confidence = sum(probs) / len(probs) if probs else 1.0
-            segments.append(TranscriptionSegment(
-                start=seg.start,
-                end=seg.end,
-                text=seg.text.strip(),
-                confidence=confidence,
-                words=words,
-            ))
-            if on_progress and total > 0:
-                on_progress(seg.end, total)
+        t = threading.Thread(target=_pipe_stderr, daemon=True)
+        t.start()
 
+        stdout, _ = proc.communicate()
+        t.join()
+
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"transcribe_worker завершился с кодом {proc.returncode}"
+            )
+
+        data = json.loads(stdout)
+
+        segments = [
+            TranscriptionSegment(
+                start=s["start"],
+                end=s["end"],
+                text=s["text"],
+                confidence=s["confidence"],
+                words=[TranscriptionWord(**w) for w in s.get("words", [])],
+            )
+            for s in data["segments"]
+        ]
         return TranscriptionResult(
             segments=segments,
-            language=info.language,
-            duration=info.duration,
+            language=data["language"],
+            duration=data["duration"],
         )

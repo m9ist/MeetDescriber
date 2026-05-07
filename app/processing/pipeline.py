@@ -28,7 +28,7 @@ log = logging.getLogger("app")
 
 from app.storage.db import get_conn
 from app.storage import file_manager
-from app.transcription.backend import get_backend, unload_model, TranscriptionResult
+from app.transcription.backend import get_backend, TranscriptionResult
 from app.diarization.pyannote_diarizer import PyannoteDiarizer, DiarizationSegment
 
 
@@ -391,9 +391,8 @@ def run_transcription(
     _progress("done")
     log.info("pipeline done  job=%d", job_id)
 
-    log.info("pipeline unloading whisper model")
-    unload_model()
-    log.info("pipeline whisper unloaded")
+    # Whisper и pyannote оба работают в subprocess — VRAM освобождается
+    # автоматически при завершении дочернего процесса, unload не нужен.
 
     return doc_paths["transcription"]
 
