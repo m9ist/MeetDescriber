@@ -1,21 +1,26 @@
 """
 Диаризация спикеров через pyannote.audio 4.x.
 
-Особенность pyannote 4.x на Windows: torchcodec не работает без FFmpeg full-shared.
-Поэтому аудио загружаем вручную через soundfile → torch.Tensor и передаём как dict.
+pyannote (PyTorch) и faster-whisper (ctranslate2) оба бандлят cudnn64_9.dll.
+При совместной загрузке в одном адресном пространстве — stack corruption
+(0xc0000409, BEX64). Решение: diarize_worker.py запускается отдельным
+subprocess-ом; pyannote живёт только в нём и умирает вместе с процессом.
 """
 from __future__ import annotations
 
+import json
 import logging
-import wave
+import os
+import subprocess
+import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-import warnings
-
-import config
-
 log = logging.getLogger("app")
+
+_WORKER = Path(__file__).parent / "diarize_worker.py"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass
@@ -25,109 +30,37 @@ class DiarizationSegment:
     speaker: str     # SPEAKER_00, SPEAKER_01, ...
 
 
-_pipeline = None
-_pipeline_lock = None
-
-
 def unload() -> None:
-    """Выгружает pipeline из памяти (VRAM + RAM). Потокобезопасно."""
-    global _pipeline
-    import gc
-    import torch
-    if _pipeline_lock is None:
-        return
-    with _pipeline_lock:
-        _pipeline = None
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-
-def _get_pipeline():
-    global _pipeline, _pipeline_lock
-    import threading
-    if _pipeline_lock is None:
-        _pipeline_lock = threading.Lock()
-    with _pipeline_lock:
-        if _pipeline is None:
-            import torch
-            if torch.cuda.is_available():
-                free, total = torch.cuda.mem_get_info()
-                log.info("pyannote load: VRAM free %.1f GB / %.1f GB",
-                         free / 1e9, total / 1e9)
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", message="torchcodec is not installed")
-                warnings.filterwarnings("ignore", category=UserWarning, module="torio")
-                from pyannote.audio import Pipeline
-            _pipeline = Pipeline.from_pretrained(
-                "pyannote/speaker-diarization-3.1",
-            )
-            # Грузим на CUDA если доступна, иначе CPU.
-            # Диаризация идёт до транскрипции (до загрузки whisper),
-            # поэтому VRAM свободна. pyannote (~2 GB) + whisper-large-v3 (~6 GB)
-            # суммарно ~8 GB — умещается на 12 GB карте (RTX 3060 Ti / 4070 и т.п.).
-            # OOM при такой конфигурации исключён.
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            try:
-                _pipeline.to(torch.device(device))
-                log.info("pyannote loaded on %s", device)
-            except Exception:
-                log.error("pyannote failed to move to %s", device, exc_info=True)
-                raise
-    return _pipeline
-
-
-
-
-def _load_wav_as_tensor(path: Path):
-    """Загружает WAV как (1, samples) torch.Tensor без torchcodec."""
-    import struct
-    import torch
-
-    with wave.open(str(path), "rb") as wf:
-        n_channels = wf.getnchannels()
-        sample_width = wf.getsampwidth()
-        frame_rate = wf.getframerate()
-        n_frames = wf.getnframes()
-        raw = wf.readframes(n_frames)
-
-    if sample_width == 2:
-        fmt = f"<{len(raw) // 2}h"
-        samples = struct.unpack(fmt, raw)
-        tensor = torch.tensor(samples, dtype=torch.float32) / 32768.0
-    elif sample_width == 4:
-        fmt = f"<{len(raw) // 4}i"
-        samples = struct.unpack(fmt, raw)
-        tensor = torch.tensor(samples, dtype=torch.float32) / 2147483648.0
-    else:
-        raise ValueError(f"Unsupported sample width: {sample_width}")
-
-    # Микшируем каналы в моно если нужно
-    if n_channels > 1:
-        tensor = tensor.reshape(-1, n_channels).mean(dim=1)
-
-    return tensor.unsqueeze(0), frame_rate  # (1, samples), rate
+    """No-op: модели живут в subprocess, выгружаются вместе с ним."""
 
 
 class PyannoteDiarizer:
 
     def diarize(self, audio_path: Path) -> list[DiarizationSegment]:
-        pipeline = _get_pipeline()
-        waveform, rate = _load_wav_as_tensor(audio_path)
+        proc = subprocess.Popen(
+            [sys.executable, str(_WORKER), str(audio_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(_REPO_ROOT),
+            env=os.environ.copy(),
+        )
 
-        audio = {"waveform": waveform.cpu(), "sample_rate": rate}
-        result = pipeline(audio)
+        # Форвардим stderr worker'а в app.log в реальном времени
+        def _pipe_stderr() -> None:
+            for line in proc.stderr:
+                log.debug("[diarize_worker] %s", line.rstrip())
 
-        # pyannote 4.x возвращает DiarizeOutput; нужный атрибут — speaker_diarization
-        # более старые версии возвращают Annotation напрямую
-        annotation = getattr(result, "speaker_diarization", result)
+        t = threading.Thread(target=_pipe_stderr, daemon=True)
+        t.start()
 
-        segments: list[DiarizationSegment] = []
-        for turn, _, speaker in annotation.itertracks(yield_label=True):
-            segments.append(DiarizationSegment(
-                start=turn.start,
-                end=turn.end,
-                speaker=speaker,
-            ))
+        stdout, _ = proc.communicate()
+        t.join()
 
-        return sorted(segments, key=lambda s: s.start)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"diarize_worker завершился с кодом {proc.returncode}"
+            )
+
+        data = json.loads(stdout)
+        return [DiarizationSegment(**d) for d in data]

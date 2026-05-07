@@ -30,7 +30,6 @@ from app.storage.db import get_conn
 from app.storage import file_manager
 from app.transcription.backend import get_backend, unload_model, TranscriptionResult
 from app.diarization.pyannote_diarizer import PyannoteDiarizer, DiarizationSegment
-import app.diarization.pyannote_diarizer as _diarizer_module
 
 
 class PipelineCancelledError(Exception):
@@ -392,12 +391,9 @@ def run_transcription(
     _progress("done")
     log.info("pipeline done  job=%d", job_id)
 
-    # Выгружаем модели: сначала ctranslate2 (whisper), потом PyTorch (pyannote).
-    # Порядок важен — обратный вызывает SIGABRT при деструкции CUDA-контекстов.
-    log.info("pipeline unloading models")
+    log.info("pipeline unloading whisper model")
     unload_model()
-    _diarizer_module.unload()
-    log.info("pipeline models unloaded")
+    log.info("pipeline whisper unloaded")
 
     return doc_paths["transcription"]
 
