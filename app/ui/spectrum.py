@@ -125,6 +125,8 @@ class SpectrumWidget:
         with self._lock:
             data = bytes(self._buf[-4096:])
         ch = self._channels
+        if not ch:
+            return 0.0
         count = len(data) // (2 * ch)
         if count < 16:
             return 0.0
@@ -136,6 +138,8 @@ class SpectrumWidget:
             data = bytes(self._buf)
 
         ch = self._channels
+        if not ch:
+            return [0.0] * N_BARS
         count = len(data) // (2 * ch)
         if count < 64:
             return [0.0] * N_BARS
