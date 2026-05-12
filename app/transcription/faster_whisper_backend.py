@@ -70,7 +70,11 @@ class FasterWhisperBackend(TranscriptionBackend):
         t = threading.Thread(target=_pipe_stderr, daemon=True)
         t.start()
 
-        stdout, _ = proc.communicate()
+        # ВАЖНО: НЕ вызываем proc.communicate() — она внутри стартует ещё один
+        # reader-тред для stderr и гонится с нашим _pipe_stderr (Windows pipe
+        # читается дважды → строки PROGRESS теряются). Читаем stdout вручную.
+        stdout = proc.stdout.read()
+        proc.wait()
         t.join()
 
         if proc.returncode != 0:

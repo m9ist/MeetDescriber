@@ -57,7 +57,10 @@ class PyannoteDiarizer:
         t = threading.Thread(target=_pipe_stderr, daemon=True)
         t.start()
 
-        stdout, _ = proc.communicate()
+        # НЕ через communicate() — она запускает свой stderr-reader и гонится
+        # с нашим _pipe_stderr. Читаем stdout вручную.
+        stdout = proc.stdout.read()
+        proc.wait()
         t.join()
 
         if proc.returncode != 0:
