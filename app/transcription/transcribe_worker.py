@@ -118,10 +118,15 @@ def main() -> None:
         log.info("model loaded; VRAM free %.1f GB", _vram_free_gb())
         log.info("starting transcription of %s", audio_path.name)
 
+        # word_timestamps=True временно ОТКЛЮЧЁН: дополнительный alignment-проход
+        # в combo с vad_filter+ru+сложным аудио провоцирует зависание в
+        # generate_with_fallback (см. faulthandler-дамп в transcribe_worker_fault.log).
+        # words нигде в pipeline не используются — только для расчёта confidence.
+        # Заменили на math.exp(avg_logprob) — сегмент-уровневая оценка.
         raw_segments, info = model.transcribe(
             str(audio_path),
             language=config.WHISPER_LANGUAGE,
-            word_timestamps=True,
+            word_timestamps=False,
             vad_filter=True,
         )
 
@@ -129,23 +134,18 @@ def main() -> None:
         log.info("transcribe() returned generator; audio duration=%.1f s, lang=%s",
                  total_dur, info.language)
 
+        import math
         segments = []
         last_log_t = time.monotonic()
         for seg_idx, seg in enumerate(raw_segments):
-            words = []
-            probs = []
-            if seg.words:
-                for w in seg.words:
-                    words.append({
-                        "start": w.start, "end": w.end,
-                        "word": w.word, "probability": w.probability,
-                    })
-                    probs.append(w.probability)
-            confidence = sum(probs) / len(probs) if probs else 1.0
+            # Segment-уровень confidence: exp(avg_logprob).
+            # avg_logprob — natural log средней вероятности токенов, обычно
+            # около -0.1..-0.5 для нормальной речи.
+            confidence = math.exp(seg.avg_logprob) if seg.avg_logprob is not None else 1.0
             segments.append({
                 "start": seg.start, "end": seg.end,
                 "text": seg.text.strip(), "confidence": confidence,
-                "words": words,
+                "words": [],
             })
             # Прогресс — парсится родителем из stderr
             print(f"PROGRESS:{seg.end:.3f}/{total_dur:.3f}", file=sys.stderr, flush=True)
