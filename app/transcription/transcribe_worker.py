@@ -9,9 +9,28 @@ ctranslate2 (whisper) и PyTorch (pyannote) никогда не оказывал
 Выход: JSON {segments, language, duration} в stdout
        PROGRESS:<cur>/<total>  + обычные логи — в stderr
 """
+import sys
+
+# ────────────────────────────────────────────────────────────────────────
+# КРИТИЧЕСКИ ВАЖНО: блокируем `import torch` ПЕРЕД любым импортом ctranslate2.
+#
+# ctranslate2 при загрузке (__init__ → converters → transformers.py) делает:
+#     try:
+#         import torch
+#     except ImportError:
+#         pass
+# Если torch есть — он подтягивает свою cuDNN 9.1.0 в адресное пространство,
+# а ctranslate2 бандлит cuDNN 9.10.2 (другой бинарь, тот же `cudnn64_9.dll`).
+# Две версии одной DLL → stack corruption через несколько минут работы
+# (0xC0000409, BEX64) → процесс убивается Windows без traceback.
+#
+# Подкладываем None в sys.modules — `import torch` падает ImportError и
+# ctranslate2 благополучно работает без него (ему torch для инференса не нужен).
+# ────────────────────────────────────────────────────────────────────────
+sys.modules["torch"] = None  # type: ignore[assignment]
+
 import json
 import logging
-import sys
 from pathlib import Path
 
 # Добавляем корень репозитория в sys.path чтобы импортировать config
@@ -37,15 +56,39 @@ def main() -> None:
         log.error("File not found: %s", audio_path)
         sys.exit(1)
 
-    import torch
+    # ──────────────────────────────────────────────────────────────────────
+    # КРИТИЧЕСКИ ВАЖНО: НЕ ИМПОРТИРОВАТЬ torch в этом процессе.
+    # torch бандлит cuDNN 9.1.0, ctranslate2 бандлит cuDNN 9.10.2 — обе либы
+    # лезут за одним `cudnn64_9.dll`, порядок загрузки лотерея, через несколько
+    # минут работы случается stack corruption (0xC0000409, BEX64) и процесс
+    # умирает без Python traceback.
+    # CUDA-детекция — через ctranslate2; VRAM-инфо — через nvidia-smi.
+    # ──────────────────────────────────────────────────────────────────────
+    import ctranslate2
     from faster_whisper import WhisperModel
 
-    device  = "cuda" if torch.cuda.is_available() else "cpu"
-    compute = "float16" if device == "cuda" else "int8"
+    # ВНИМАНИЕ: транскрипция на CPU ЯВНО ЗАПРЕЩЕНА.
+    # Если CUDA недоступна — фейлимся, а не молча переключаемся на CPU
+    # (CPU занимает 30-40 минут на час аудио → неприемлемо).
+    if ctranslate2.get_cuda_device_count() < 1:
+        log.error("CUDA is not available. CPU transcription is disabled by policy.")
+        sys.exit(1)
 
-    if torch.cuda.is_available():
-        free, total = torch.cuda.mem_get_info()
-        log.info("VRAM free %.1f GB / %.1f GB", free / 1e9, total / 1e9)
+    device  = "cuda"
+    compute = "float16"
+
+    # VRAM-инфо через nvidia-smi (без torch — чтобы не тянуть его cuDNN)
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=memory.free,memory.total",
+             "--format=csv,noheader,nounits"],
+            text=True, timeout=5,
+        )
+        free_mib, total_mib = (int(x) for x in out.strip().split(", "))
+        log.info("VRAM free %.1f GB / %.1f GB", free_mib / 1024, total_mib / 1024)
+    except Exception as e:
+        log.warning("nvidia-smi failed: %s", e)
 
     log.info("loading %s on %s...", config.WHISPER_MODEL, device)
     try:
