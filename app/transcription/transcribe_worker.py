@@ -118,16 +118,23 @@ def main() -> None:
         log.info("model loaded; VRAM free %.1f GB", _vram_free_gb())
         log.info("starting transcription of %s", audio_path.name)
 
-        # word_timestamps=True временно ОТКЛЮЧЁН: дополнительный alignment-проход
-        # в combo с vad_filter+ru+сложным аудио провоцирует зависание в
-        # generate_with_fallback (см. faulthandler-дамп в transcribe_worker_fault.log).
-        # words нигде в pipeline не используются — только для расчёта confidence.
-        # Заменили на math.exp(avg_logprob) — сегмент-уровневая оценка.
+        # ВАЖНО: temperature=(0.0,) полностью отключает fallback-цикл.
+        # Без этого whisper при сложных чанках (русский+шум+несколько голосов)
+        # перебирает температуры 0.0..1.0, висит в generate_with_fallback на одном
+        # сегменте 8+ минут и в итоге abort'ит ctranslate2 (см. faulthandler-дамп).
+        # С единственной температурой 0.0 модель делает ровно один проход:
+        # получает результат сразу, без переборов и зависаний.
+        #
+        # word_timestamps=False — слишком дорого + не используется downstream.
+        # vad_filter=True оставляем — отрезает тишину и снижает кол-во чанков.
         raw_segments, info = model.transcribe(
             str(audio_path),
             language=config.WHISPER_LANGUAGE,
             word_timestamps=False,
             vad_filter=True,
+            temperature=(0.0,),
+            compression_ratio_threshold=None,
+            log_prob_threshold=None,
         )
 
         total_dur = info.duration or 0.0
