@@ -11,27 +11,30 @@ ctranslate2 (whisper) и PyTorch (pyannote) никогда не оказывал
 """
 import sys
 
-# ────────────────────────────────────────────────────────────────────────
-# КРИТИЧЕСКИ ВАЖНО: блокируем `import torch` ПЕРЕД любым импортом ctranslate2.
-#
-# ctranslate2 при загрузке (__init__ → converters → transformers.py) делает:
-#     try:
-#         import torch
-#     except ImportError:
-#         pass
-# Если torch есть — он подтягивает свою cuDNN 9.1.0 в адресное пространство,
-# а ctranslate2 бандлит cuDNN 9.10.2 (другой бинарь, тот же `cudnn64_9.dll`).
-# Две версии одной DLL → stack corruption через несколько минут работы
-# (0xC0000409, BEX64) → процесс убивается Windows без traceback.
-#
-# Подкладываем None в sys.modules — `import torch` падает ImportError и
-# ctranslate2 благополучно работает без него (ему torch для инференса не нужен).
-# ────────────────────────────────────────────────────────────────────────
+# Блокируем `import torch` ПЕРЕД любым импортом ctranslate2 (см. подробный
+# комментарий ниже про cuDNN-конфликт).
 sys.modules["torch"] = None  # type: ignore[assignment]
 
+import faulthandler
 import json
 import logging
+import os
+import time
+import traceback
 from pathlib import Path
+
+# ────────────────────────────────────────────────────────────────────────
+# Диагностика крашей: faulthandler пишет стектрейсы всех Python-тредов
+# при получении SIGABRT/SIGSEGV/SIGFPE/SIGBUS/SIGILL. Это не помогает,
+# если процесс убивается __fastfail() мимо Python — но если хоть какой
+# Python-обработчик ещё жив, мы получим картину.
+# ────────────────────────────────────────────────────────────────────────
+_fh_path = Path(__file__).resolve().parents[2] / "transcribe_worker_fault.log"
+_fh_file = open(_fh_path, "a", buffering=1, encoding="utf-8")
+_fh_file.write(f"\n=== worker start pid={os.getpid()} {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+faulthandler.enable(file=_fh_file)
+# Каждые 30 секунд пишем дамп тредов — если worker зависнет, увидим где
+faulthandler.dump_traceback_later(30, repeat=True, file=_fh_file)
 
 # Добавляем корень репозитория в sys.path чтобы импортировать config
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -90,10 +93,30 @@ def main() -> None:
     except Exception as e:
         log.warning("nvidia-smi failed: %s", e)
 
+    # Подтверждение: torch ДЕЙСТВИТЕЛЬНО не загружен
+    log.info("torch blocked: sys.modules['torch']=%r", sys.modules.get("torch"))
+    log.info("loaded modules count: %d", len(sys.modules))
+
+    # Будем сохранять прогресс в отдельный JSON — даже при краше будут partial-сегменты
+    partial_path = audio_path.parent / f"{audio_path.stem}_transcription_partial.json"
+
+    def _vram_free_gb() -> float:
+        try:
+            import subprocess
+            out = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=memory.free",
+                 "--format=csv,noheader,nounits"],
+                text=True, timeout=3,
+            )
+            return int(out.strip()) / 1024
+        except Exception:
+            return -1.0
+
     log.info("loading %s on %s...", config.WHISPER_MODEL, device)
     try:
         model = WhisperModel(config.WHISPER_MODEL, device=device, compute_type=compute)
-        log.info("model loaded, transcribing %s", audio_path.name)
+        log.info("model loaded; VRAM free %.1f GB", _vram_free_gb())
+        log.info("starting transcription of %s", audio_path.name)
 
         raw_segments, info = model.transcribe(
             str(audio_path),
@@ -103,8 +126,12 @@ def main() -> None:
         )
 
         total_dur = info.duration or 0.0
+        log.info("transcribe() returned generator; audio duration=%.1f s, lang=%s",
+                 total_dur, info.language)
+
         segments = []
-        for seg in raw_segments:
+        last_log_t = time.monotonic()
+        for seg_idx, seg in enumerate(raw_segments):
             words = []
             probs = []
             if seg.words:
@@ -123,13 +150,36 @@ def main() -> None:
             # Прогресс — парсится родителем из stderr
             print(f"PROGRESS:{seg.end:.3f}/{total_dur:.3f}", file=sys.stderr, flush=True)
 
+            # Раз в 10 секунд: лог + сохранение partial + VRAM
+            now = time.monotonic()
+            if now - last_log_t >= 10:
+                last_log_t = now
+                log.info(
+                    "seg #%d  audio=%.1f/%.1f s  segs_collected=%d  VRAM_free=%.1f GB",
+                    seg_idx, seg.end, total_dur, len(segments), _vram_free_gb(),
+                )
+                try:
+                    partial_path.write_text(json.dumps({
+                        "segments": segments, "language": info.language,
+                        "duration": total_dur, "partial": True,
+                    }), encoding="utf-8")
+                except Exception as e:
+                    log.warning("partial save failed: %s", e)
+
         log.info("done: %d segments, lang=%s, duration=%.1f s",
                  len(segments), info.language, total_dur)
 
+        # Финальный сохранён — удалим partial
+        try:
+            partial_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
         print(json.dumps({"segments": segments, "language": info.language, "duration": total_dur}))
 
-    except Exception as exc:
-        log.error("transcription failed: %s: %s", type(exc).__name__, exc, exc_info=True)
+    except BaseException as exc:
+        log.error("transcription failed: %s: %s", type(exc).__name__, exc)
+        log.error("traceback:\n%s", traceback.format_exc())
         sys.exit(1)
 
 
