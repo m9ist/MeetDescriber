@@ -40,13 +40,17 @@ class FasterWhisperBackend(TranscriptionBackend):
         audio_path: Path,
         on_progress: Optional[Callable[[float, float], None]] = None,
     ) -> TranscriptionResult:
+        # -u (unbuffered Python I/O) обязательно: иначе stderr child-процесса
+        # буферизуется при пайпинге, PROGRESS-строки накапливаются и status-окно
+        # не показывает прогресс в реальном времени.
         proc = subprocess.Popen(
-            [sys.executable, str(_WORKER), str(audio_path)],
+            [sys.executable, "-u", str(_WORKER), str(audio_path)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            bufsize=1,           # line-buffered с parent-side
             cwd=str(_REPO_ROOT),
-            env=os.environ.copy(),
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
 
         # stderr: PROGRESS:cur/total → on_progress; остальное → app.log

@@ -37,13 +37,16 @@ def unload() -> None:
 class PyannoteDiarizer:
 
     def diarize(self, audio_path: Path) -> list[DiarizationSegment]:
+        # -u + PYTHONUNBUFFERED=1: stderr child-процесса в pipe иначе
+        # буферизуется и логи приходят пачкой только при завершении worker'а.
         proc = subprocess.Popen(
-            [sys.executable, str(_WORKER), str(audio_path)],
+            [sys.executable, "-u", str(_WORKER), str(audio_path)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            bufsize=1,
             cwd=str(_REPO_ROOT),
-            env=os.environ.copy(),
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
 
         # Форвардим stderr worker'а в app.log в реальном времени
