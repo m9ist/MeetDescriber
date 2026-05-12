@@ -48,41 +48,46 @@ def main() -> None:
         log.info("VRAM free %.1f GB / %.1f GB", free / 1e9, total / 1e9)
 
     log.info("loading %s on %s...", config.WHISPER_MODEL, device)
-    model = WhisperModel(config.WHISPER_MODEL, device=device, compute_type=compute)
-    log.info("model loaded, transcribing %s", audio_path.name)
+    try:
+        model = WhisperModel(config.WHISPER_MODEL, device=device, compute_type=compute)
+        log.info("model loaded, transcribing %s", audio_path.name)
 
-    raw_segments, info = model.transcribe(
-        str(audio_path),
-        language=config.WHISPER_LANGUAGE,
-        word_timestamps=True,
-        vad_filter=True,
-    )
+        raw_segments, info = model.transcribe(
+            str(audio_path),
+            language=config.WHISPER_LANGUAGE,
+            word_timestamps=True,
+            vad_filter=True,
+        )
 
-    total_dur = info.duration or 0.0
-    segments = []
-    for seg in raw_segments:
-        words = []
-        probs = []
-        if seg.words:
-            for w in seg.words:
-                words.append({
-                    "start": w.start, "end": w.end,
-                    "word": w.word, "probability": w.probability,
-                })
-                probs.append(w.probability)
-        confidence = sum(probs) / len(probs) if probs else 1.0
-        segments.append({
-            "start": seg.start, "end": seg.end,
-            "text": seg.text.strip(), "confidence": confidence,
-            "words": words,
-        })
-        # Прогресс — парсится родителем из stderr
-        print(f"PROGRESS:{seg.end:.3f}/{total_dur:.3f}", file=sys.stderr, flush=True)
+        total_dur = info.duration or 0.0
+        segments = []
+        for seg in raw_segments:
+            words = []
+            probs = []
+            if seg.words:
+                for w in seg.words:
+                    words.append({
+                        "start": w.start, "end": w.end,
+                        "word": w.word, "probability": w.probability,
+                    })
+                    probs.append(w.probability)
+            confidence = sum(probs) / len(probs) if probs else 1.0
+            segments.append({
+                "start": seg.start, "end": seg.end,
+                "text": seg.text.strip(), "confidence": confidence,
+                "words": words,
+            })
+            # Прогресс — парсится родителем из stderr
+            print(f"PROGRESS:{seg.end:.3f}/{total_dur:.3f}", file=sys.stderr, flush=True)
 
-    log.info("done: %d segments, lang=%s, duration=%.1f s",
-             len(segments), info.language, total_dur)
+        log.info("done: %d segments, lang=%s, duration=%.1f s",
+                 len(segments), info.language, total_dur)
 
-    print(json.dumps({"segments": segments, "language": info.language, "duration": total_dur}))
+        print(json.dumps({"segments": segments, "language": info.language, "duration": total_dur}))
+
+    except Exception as exc:
+        log.error("transcription failed: %s: %s", type(exc).__name__, exc, exc_info=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
