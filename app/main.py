@@ -64,7 +64,7 @@ for _noisy in ("numba", "httpcore", "httpx", "urllib3"):
 
 from app.storage.db import init_db, get_conn, update_session, update_job_paths
 from app.storage.file_manager import rename_session_docs
-from app.capture.audio_capture import AudioCapture, list_audio_sources
+from app.capture.audio_capture import AudioCapture
 from app.extension.native_host import NativeHost, read_message, send_message
 from app.ui import notifications, tray as tray_module, dialogs
 from app.ui.spectrum import SpectrumWidget
@@ -208,22 +208,13 @@ class App:
 
     def _on_start_manual(self) -> None:
         def show():
-            sources = list_audio_sources()
-            result = dialogs.ask_meeting_info(
-                self._root,
-                show_source_selector=True,
-                audio_sources=sources,
-                browser_tabs=self._latest_tabs,
-            )
+            result = dialogs.ask_meeting_info(self._root)
             if result:
-                device_index = None
-                if result["source"] and result["source"].get("type") == "audio":
-                    device_index = result["source"].get("index")
                 self._start_session(
                     title=result["title"],
                     agenda=result["agenda"],
                     source="manual",
-                    device_index=device_index,
+                    device_index=None,
                 )
         self._schedule(show)
 
