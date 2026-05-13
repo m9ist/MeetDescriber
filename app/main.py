@@ -268,7 +268,6 @@ class App:
         session_dir = config.RECORDINGS_DIR / f"session_{self._current_session_id}"
 
         self._capture = AudioCapture(session_dir=session_dir)
-        self._capture.on_quality_low = lambda idx, score: notifications.quality_warning(idx, score)
         self._capture.on_error = lambda e: log.error("capture error: %s", e, exc_info=e)
         self._capture.on_audio_frame = self._spectrum.push_frame
         self._capture.start(device_index=device_index)

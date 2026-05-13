@@ -72,42 +72,6 @@ def _show_recording_started(meeting_title: str, on_skip: Callable[[], None]) -> 
     win.after(9000, lambda: win.destroy() if win.winfo_exists() else None)
 
 
-# ── Предупреждение о качестве ────────────────────────────────────────────────
-
-def quality_warning(chunk_idx: int, score: float) -> None:
-    _schedule(lambda: _show_quality_toast(chunk_idx, score))
-
-
-def _show_quality_toast(chunk_idx: int, score: float) -> None:
-    win = tk.Toplevel(_root)
-    win.title("")
-    win.resizable(False, False)
-    win.attributes("-topmost", True)
-    win.overrideredirect(True)
-
-    _position_bottom_right(win, w=280, h=60, offset_y=130)
-
-    frame = tk.Frame(win, bg="#3a2a00", padx=12, pady=8)
-    frame.pack(fill="both", expand=True)
-
-    tk.Label(
-        frame,
-        text=f"⚠  Плохо слышно (последние ~30 сек)",
-        bg="#3a2a00", fg="#ffcc44",
-        font=(config.UI_FONT, 9),
-        anchor="w",
-    ).pack(fill="x")
-
-    tk.Label(
-        frame, text=f"Уверенность: {score:.0%}",
-        bg="#3a2a00", fg="#888866",
-        font=(config.UI_FONT, 8),
-        anchor="w",
-    ).pack(fill="x")
-
-    win.after(5000, lambda: win.destroy() if win.winfo_exists() else None)
-
-
 # ── Обработать сейчас? ───────────────────────────────────────────────────────
 
 def process_now(
