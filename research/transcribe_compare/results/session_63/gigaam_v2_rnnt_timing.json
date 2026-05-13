@@ -1,0 +1,9 @@
+{
+  "tool": "gigaam-v2_rnnt",
+  "wav": "K:\\repos\\for_meets\\data\\recordings\\session_63\\merged.wav",
+  "model_load_sec": 2.38,
+  "vad_sec": 9.22,
+  "transcribe_sec": 170.69,
+  "final_segments": 744,
+  "vram_peak_gb": 0.66
+}

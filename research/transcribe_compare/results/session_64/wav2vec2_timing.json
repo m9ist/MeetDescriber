@@ -1,0 +1,8 @@
+{
+  "tool": "wav2vec2-xlsr-russian",
+  "wav": "K:\\repos\\for_meets\\data\\recordings\\session_64\\merged.wav",
+  "model_load_sec": 13.42,
+  "transcribe_sec": 0.53,
+  "final_segments": 2,
+  "vram_peak_gb": 1.79
+}

@@ -1,0 +1,11 @@
+{
+  "tool": "whisperx",
+  "wav": "K:\\repos\\for_meets\\data\\recordings\\session_64\\merged.wav",
+  "model_load_sec": 13.86,
+  "transcribe_sec": 1.09,
+  "transcribe_segments": 1,
+  "align_load_sec": 77.2,
+  "align_sec": 2.12,
+  "vram_peak_gb": 1.56,
+  "final_segments": 1
+}

@@ -1,0 +1,11 @@
+{
+  "tool": "whisperx",
+  "wav": "K:\\repos\\for_meets\\data\\recordings\\session_63\\merged.wav",
+  "model_load_sec": 13.05,
+  "transcribe_sec": 159.72,
+  "transcribe_segments": 199,
+  "align_error": "The chosen align_model \"jonatasgrosman/wav2vec2-large-xlsr-53-russian\" could not be found in huggingface (https://huggingface.co/models) or torchaudio (https://pytorch.org/audio/stable/pipelines.html#id14)",
+  "diar_error": "DiarizationPipeline.__init__() got an unexpected keyword argument 'use_auth_token'",
+  "vram_peak_gb": 0.26,
+  "final_segments": 199
+}
