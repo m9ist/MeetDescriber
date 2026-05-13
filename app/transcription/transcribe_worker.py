@@ -122,8 +122,14 @@ def main() -> None:
         # Без этого whisper при сложных чанках (русский+шум+несколько голосов)
         # перебирает температуры 0.0..1.0, висит в generate_with_fallback на одном
         # сегменте 8+ минут и в итоге abort'ит ctranslate2 (см. faulthandler-дамп).
-        # С единственной температурой 0.0 модель делает ровно один проход:
-        # получает результат сразу, без переборов и зависаний.
+        #
+        # Но при temperature=(0.0,) нечем гасить зацикливания (whisper на тихом
+        # аудио штампует одно слово подряд). Поэтому:
+        # - condition_on_previous_text=False — модель не цепляется за свой же
+        #   предыдущий вывод "ага → ага → ага..."
+        # - repetition_penalty=1.2 — softмерная penalty на повтор токенов
+        # - no_repeat_ngram_size=3 — жёсткий запрет повторять 3-граммы в одном
+        #   проходе декодирования
         #
         # word_timestamps=False — слишком дорого + не используется downstream.
         # vad_filter=True оставляем — отрезает тишину и снижает кол-во чанков.
@@ -135,6 +141,9 @@ def main() -> None:
             temperature=(0.0,),
             compression_ratio_threshold=None,
             log_prob_threshold=None,
+            condition_on_previous_text=False,
+            repetition_penalty=1.2,
+            no_repeat_ngram_size=3,
         )
 
         total_dur = info.duration or 0.0
