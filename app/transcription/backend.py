@@ -49,21 +49,37 @@ class TranscriptionBackend(ABC):
         ...
 
 
-def get_backend() -> TranscriptionBackend:
-    """Возвращает подходящий бэкенд для текущей платформы."""
+def get_backend(engine: Optional[str] = None) -> TranscriptionBackend:
+    """Возвращает подходящий бэкенд.
+
+    Mac → mlx-whisper (single option).
+    Windows/Linux → переключается через config.TRANSCRIPTION_ENGINE ("whisper" | "gigaam"),
+    либо явный аргумент engine.
+
+    См. research/transcribe_compare/README.md по сравнению движков.
+    """
     if config.IS_MAC:
         from app.transcription.mlx_whisper_backend import MLXWhisperBackend
         return MLXWhisperBackend()
-    else:
+
+    chosen = engine or getattr(config, "TRANSCRIPTION_ENGINE", "whisper")
+    if chosen == "gigaam":
+        from app.transcription.gigaam_backend import GigaAMBackend
+        return GigaAMBackend()
+    if chosen == "whisper":
         from app.transcription.faster_whisper_backend import FasterWhisperBackend
         return FasterWhisperBackend()
+    raise ValueError(f"Unknown TRANSCRIPTION_ENGINE: {chosen!r} (expected 'whisper'|'gigaam')")
 
 
 def unload_model() -> None:
-    """Выгружает модель транскрипции из памяти."""
+    """Выгружает модель транскрипции из памяти (no-op для subprocess-бэкендов)."""
     if config.IS_MAC:
         from app.transcription import mlx_whisper_backend
         mlx_whisper_backend.unload()
-    else:
-        from app.transcription import faster_whisper_backend
-        faster_whisper_backend.unload()
+        return
+    # Все Windows-бэкенды subprocess-based → unload не нужен, но вызовы оставлены
+    # для обратной совместимости со старым кодом.
+    from app.transcription import faster_whisper_backend, gigaam_backend
+    faster_whisper_backend.unload()
+    gigaam_backend.unload()

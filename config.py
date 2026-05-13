@@ -65,6 +65,14 @@ QUALITY_THRESHOLD = 0.70         # confidence ниже этого → toast-пр
 WHISPER_MODEL = "large-v3"
 WHISPER_LANGUAGE = "ru"
 
+# Транскрипционный движок (Windows; на Mac всегда mlx-whisper):
+#   "whisper" — faster-whisper (default, чистая пунктуация, может терять
+#               сегменты с длинными паузами, см. research/transcribe_compare)
+#   "gigaam"  — Sber GigaAM v2_rnnt (полнее по покрытию, **без пунктуации**,
+#               подходит как fallback / альтернатива)
+TRANSCRIPTION_ENGINE = os.getenv("TRANSCRIPTION_ENGINE", "gigaam")
+GIGAAM_MODEL = os.getenv("GIGAAM_MODEL", "v2_rnnt")  # v2_rnnt | v2_ctc
+
 # Claude CLI — путь к исполняемому файлу
 # Задаётся через CLAUDE_CLI в .env (например C:/Users/Oleg/.local/bin/claude.exe).
 # Фолбек: платформо-зависимые типичные пути, затем PATH, затем "claude".
