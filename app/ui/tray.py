@@ -23,6 +23,7 @@ import pystray
 from PIL import Image, ImageDraw
 
 import config
+from app.ui.user_actions import log_action
 
 # Custom Win32 message: posted from any thread to trigger refresh on pystray thread.
 # WM_USER = 0x0400; +100 keeps us far from any pystray internals.
@@ -281,36 +282,42 @@ class ForMeetsTray:
                     _open_path(str(Path(p).parent))
                     return
 
-        def make_open_file(path_str):
+        def make_open_file(path_str, kind):
             def handler(icon, item):
                 if path_str and Path(path_str).exists():
+                    log_action("tray_open_file", kind=kind, path=path_str)
                     _open_path(path_str)
             return handler
 
         def edit_info(icon, item):
+            log_action("tray_edit_job_info", job_id=job["id"])
             if self._on_edit_job:
                 self._on_edit_job(job["id"])
+
+        def open_folder_logged(icon, item):
+            log_action("tray_open_folder", job_id=job["id"])
+            open_folder(icon, item)
 
         tr = job.get("transcription_path")
         an = job.get("analysis_path")
         fu = job.get("followup_path")
 
         return pystray.Menu(
-            pystray.MenuItem("Открыть расположение", open_folder),
+            pystray.MenuItem("Открыть расположение", open_folder_logged),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
                 "Транскрипция",
-                make_open_file(tr),
+                make_open_file(tr, "transcription"),
                 enabled=bool(tr and Path(tr).exists()),
             ),
             pystray.MenuItem(
                 "Анализ",
-                make_open_file(an),
+                make_open_file(an, "analysis"),
                 enabled=bool(an and Path(an).exists()),
             ),
             pystray.MenuItem(
                 "Follow-up",
-                make_open_file(fu),
+                make_open_file(fu, "followup"),
                 enabled=bool(fu and Path(fu).exists()),
             ),
             pystray.Menu.SEPARATOR,
@@ -321,13 +328,16 @@ class ForMeetsTray:
         job_id = job["id"]
 
         def process(icon, item):
+            log_action("tray_process_job", job_id=job_id, status=job.get("status"))
             self._on_process_job(job_id)
 
         def delete(icon, item):
+            log_action("tray_delete_job", job_id=job_id)
             if self._on_delete_job:
                 self._on_delete_job(job_id)
 
         def dismiss(icon, item):
+            log_action("tray_dismiss_job", job_id=job_id)
             if self._on_dismiss_job:
                 self._on_dismiss_job(job_id)
 
@@ -339,9 +349,10 @@ class ForMeetsTray:
         else:
             action_label = "Обработать"
 
-        def make_open_file(path_str):
+        def make_open_file(path_str, kind):
             def handler(icon, item):
                 if path_str and Path(path_str).exists():
+                    log_action("tray_open_file", kind=kind, path=path_str)
                     _open_path(path_str)
             return handler
 
@@ -353,12 +364,12 @@ class ForMeetsTray:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
                 "Транскрипция",
-                make_open_file(tr),
+                make_open_file(tr, "transcription"),
                 enabled=bool(tr and Path(tr).exists()),
             ),
             pystray.MenuItem(
                 "Анализ",
-                make_open_file(an),
+                make_open_file(an, "analysis"),
                 enabled=bool(an and Path(an).exists()),
             ),
             pystray.Menu.SEPARATOR,
@@ -368,23 +379,29 @@ class ForMeetsTray:
 
     def _make_job_handler(self, job_id: int) -> Callable:
         def handler(icon, item):
+            log_action("tray_process_job", job_id=job_id)
             self._on_process_job(job_id)
         return handler
 
     def _handle_delete_all_pending(self, icon, item) -> None:
+        log_action("tray_delete_all_pending")
         if self._on_delete_all_pending:
             self._on_delete_all_pending()
 
     def _handle_start(self, icon, item) -> None:
+        log_action("tray_start_recording_manual")
         self._on_start_manual()
 
     def _handle_stop(self, icon, item) -> None:
+        log_action("tray_stop_recording")
         self._on_stop()
 
     def _handle_open_meetings_window(self, icon, item) -> None:
+        log_action("tray_open_meetings_window")
         if self._on_open_meetings_window:
             self._on_open_meetings_window()
 
     def _handle_quit(self, icon, item) -> None:
+        log_action("tray_quit")
         self._on_quit()
         icon.stop()

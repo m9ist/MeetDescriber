@@ -16,6 +16,7 @@ from tkinter import messagebox, ttk
 import config
 from app.storage import meetings_repo
 from app.storage.db import get_conn
+from app.ui.user_actions import log_action
 
 log = logging.getLogger(__name__)
 
@@ -321,6 +322,7 @@ class MeetingsWindow:
     def _open_file(self, path: Optional[str]) -> None:
         if not path:
             return
+        log_action("meetings_open_file", path=path)
         try:
             if config.IS_WINDOWS:
                 os.startfile(path)
@@ -333,12 +335,15 @@ class MeetingsWindow:
     def _edit_meeting(self, session_id: int, meeting: dict) -> None:
         from app.ui.dialogs import ask_edit_meeting_info
 
+        log_action("meetings_edit_meeting", session_id=session_id,
+                   title=meeting.get("title"))
         result = ask_edit_meeting_info(
             self._win,
             title=meeting.get("title") or "",
             agenda=meeting.get("agenda") or "",
         )
         if result is None:
+            log_action("meetings_edit_meeting_cancel", session_id=session_id)
             return
         try:
             with get_conn() as conn:
@@ -353,6 +358,7 @@ class MeetingsWindow:
         self._notify_data_changed()
 
     def _restart_stage(self, job_id: Optional[int], stage: str) -> None:
+        log_action("meetings_restart_stage", job_id=job_id, stage=stage)
         if job_id is None:
             messagebox.showwarning("Нет задания", "Задание не найдено в БД.", parent=self._win)
             return
@@ -368,7 +374,9 @@ class MeetingsWindow:
         caption, question = stage_labels.get(stage, ("Перезапустить?", "Продолжить?"))
 
         if not messagebox.askyesno(caption, question, parent=self._win):
+            log_action("meetings_restart_stage_cancel", job_id=job_id, stage=stage)
             return
+        log_action("meetings_restart_stage_confirm", job_id=job_id, stage=stage)
         try:
             meetings_repo.reset_to_stage(job_id, stage)
         except Exception as e:
@@ -378,12 +386,15 @@ class MeetingsWindow:
         self._notify_data_changed()
 
     def _delete_audio(self, session_id: int) -> None:
+        log_action("meetings_delete_audio_click", session_id=session_id)
         if not messagebox.askyesno(
             "Удалить аудио",
             "Удалить аудиозаписи этого совещания?\nДокументы останутся.",
             parent=self._win,
         ):
+            log_action("meetings_delete_audio_cancel", session_id=session_id)
             return
+        log_action("meetings_delete_audio_confirm", session_id=session_id)
         try:
             meetings_repo.delete_audio(session_id)
         except Exception as e:
@@ -393,13 +404,16 @@ class MeetingsWindow:
         self._notify_data_changed()
 
     def _delete_meeting(self, session_id: int, title: str) -> None:
+        log_action("meetings_delete_meeting_click", session_id=session_id, title=title)
         if not messagebox.askyesno(
             "Удалить совещание",
             f'Удалить совещание "{title}"?\n'
             "Будут стёрты документы и аудиозаписи без возможности восстановления.",
             parent=self._win,
         ):
+            log_action("meetings_delete_meeting_cancel", session_id=session_id)
             return
+        log_action("meetings_delete_meeting_confirm", session_id=session_id, title=title)
         try:
             meetings_repo.delete_meeting(session_id)
         except Exception as e:
@@ -411,6 +425,7 @@ class MeetingsWindow:
     # ── Кнопка удаления старого аудио ────────────────────────────────────────
 
     def _on_delete_old_audio(self) -> None:
+        log_action("meetings_delete_old_audio_click")
         try:
             count, total_bytes = meetings_repo.count_old_audio(14)
         except Exception as e:
@@ -431,8 +446,10 @@ class MeetingsWindow:
             f"Найдено {count} папок аудио ({gb:.1f} GB). Удалить?",
             parent=self._win,
         ):
+            log_action("meetings_delete_old_audio_cancel", count=count)
             return
 
+        log_action("meetings_delete_old_audio_confirm", count=count, gb=round(gb, 1))
         try:
             deleted = meetings_repo.delete_old_audio(14)
         except Exception as e:
@@ -558,6 +575,7 @@ class MeetingsWindow:
     # ── Закрытие ──────────────────────────────────────────────────────────────
 
     def _on_close(self) -> None:
+        log_action("meetings_window_close")
         self._cancel_tooltip()
         self._hide_tooltip()
         self._win.destroy()

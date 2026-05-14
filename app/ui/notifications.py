@@ -9,6 +9,7 @@ from tkinter import font as tkfont
 from typing import Callable, Optional
 
 import config
+from app.ui.user_actions import log_action
 
 _root: Optional[tk.Tk] = None
 
@@ -57,6 +58,7 @@ def _show_recording_started(meeting_title: str, on_skip: Callable[[], None]) -> 
     ).pack(fill="x", pady=(2, 8))
 
     def skip():
+        log_action("notification_skip_recording", title=meeting_title)
         on_skip()
         win.destroy()
 
@@ -116,10 +118,12 @@ def _show_process_now(
     btn_frame.pack(fill="x")
 
     def do_process():
+        log_action("notification_process_now", title=session_title)
         on_process()
         win.destroy()
 
     def do_later():
+        log_action("notification_process_later", title=session_title)
         on_later()
         win.destroy()
 

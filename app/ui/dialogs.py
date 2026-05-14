@@ -17,6 +17,7 @@ from tkinter import scrolledtext, ttk
 from typing import Optional
 
 import config
+from app.ui.user_actions import log_action
 
 log = logging.getLogger(__name__)
 
@@ -140,6 +141,8 @@ class MeetingStartDialog:
         self.ok = True
         self.title_value = self._title_var.get().strip()
         self.agenda_value = self._agenda_text.get("1.0", "end").strip()
+        log_action("dialog_meeting_start_ok", title=self.title_value,
+                   agenda_len=len(self.agenda_value))
         self._win.destroy()
 
 
@@ -281,6 +284,7 @@ class ClaudeManualDialog:
         win.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
 
     def _on_run(self) -> None:
+        log_action("dialog_claude_run", stage=self._stage)
         if self._prompt_path is None:
             self._set_status("Промпт не найден", error=True)
             return
@@ -330,6 +334,7 @@ class ClaudeManualDialog:
         self._run_btn.config(state="normal")
 
     def _on_copy_cmd(self) -> None:
+        log_action("dialog_claude_copy_cmd", stage=self._stage)
         if self._prompt_path is None:
             self._set_status("Промпт не найден", error=True)
             return
@@ -346,6 +351,7 @@ class ClaudeManualDialog:
         self._set_status("Команда скопирована в буфер обмена")
 
     def _on_copy_prompt(self) -> None:
+        log_action("dialog_claude_copy_prompt", stage=self._stage)
         if not self._chat_prompt:
             self._set_status("Промпт не сформирован", error=True)
             return
@@ -355,6 +361,7 @@ class ClaudeManualDialog:
         self._set_status("Промпт скопирован в буфер обмена")
 
     def _on_open_cmd(self) -> None:
+        log_action("dialog_claude_open_cmd", stage=self._stage)
         cwd = str(config.ROOT_DIR)
         try:
             if config.IS_WINDOWS:
@@ -366,6 +373,7 @@ class ClaudeManualDialog:
             self._set_status(f"Не удалось открыть терминал: {e}", error=True)
 
     def _on_stage_done(self) -> None:
+        log_action("dialog_claude_stage_done", stage=self._stage)
         if self._output_path is None:
             self._set_status("Путь к выходному файлу не задан", error=True)
             return
@@ -376,6 +384,7 @@ class ClaudeManualDialog:
         self._win.destroy()
 
     def _on_skip(self) -> None:
+        log_action("dialog_claude_skip", stage=self._stage)
         self._queue.put(None)
         self._win.destroy()
 
@@ -458,6 +467,7 @@ class MeetingEditDialog:
         self.ok = True
         self.title_value = self._title_var.get().strip()
         self.agenda_value = self._agenda_text.get("1.0", "end").strip()
+        log_action("dialog_meeting_edit_ok", title=self.title_value)
         self._win.destroy()
 
 

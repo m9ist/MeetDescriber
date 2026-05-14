@@ -12,6 +12,7 @@ import tkinter.ttk as ttk
 from typing import Optional
 
 import config
+from app.ui.user_actions import log_action
 
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
@@ -217,6 +218,7 @@ class ProcessingStatusWindow:
         self._root.after(100, self._tick)
 
     def _on_cancel(self) -> None:
+        log_action("status_window_cancel", meeting_title=self._meeting_title)
         if self._cancel_event:
             self._cancel_event.set()
         # Не закрываем окно сразу — faster-whisper/pyannote не прерываются изнутри.
