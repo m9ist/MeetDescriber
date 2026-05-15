@@ -84,7 +84,10 @@ class ProcessingStatusWindow:
         win.title("for_meets — обработка")
         win.resizable(False, False)
         win.attributes("-topmost", True)
-        win.protocol("WM_DELETE_WINDOW", lambda: None)  # нельзя закрыть вручную
+        # На Mac WM_DELETE_WINDOW зовётся из NSControlTrackMouse → SIGABRT.
+        # На Win/Linux запрещаем закрытие через no-op. На Mac убираем кнопку X.
+        if not config.IS_MAC:
+            win.protocol("WM_DELETE_WINDOW", lambda: None)
 
         w, h = 380, 130
         sw = win.winfo_screenwidth()
@@ -167,6 +170,12 @@ class ProcessingStatusWindow:
 
         self._win = win
         self._spinning = True
+
+        # На Mac убираем кнопку закрытия (X) — закрытие только программно через _destroy.
+        if config.IS_MAC:
+            from app.ui.mac_window import harden_for_mac
+            harden_for_mac(win)
+
         self._tick()
 
     def _update(self, stage: str, detail: str) -> None:

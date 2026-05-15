@@ -101,7 +101,14 @@ class MeetingsWindow:
         self._build_ui()
         self._reload_meetings()
 
-        win.protocol("WM_DELETE_WINDOW", self._on_close)
+        # На Mac WM_DELETE_WINDOW зовётся из NSControlTrackMouse → SIGABRT.
+        # Прячем кнопку X — закрытие через ESC или меню.
+        if config.IS_MAC:
+            from app.ui.mac_window import harden_for_mac
+            harden_for_mac(win)
+            win.bind("<Escape>", lambda e: self._on_close())
+        else:
+            win.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_ui(self) -> None:
         win = self._win
@@ -158,7 +165,11 @@ class MeetingsWindow:
         self._tree.pack(fill="both", expand=True)
 
         # Контекстное меню
+        # На Mac правый клик → Button-2, на Win/Linux → Button-3. Биндим оба.
+        # Control+Click на Mac также эмулирует правый клик (Ctrl+Button-1).
         self._tree.bind("<Button-3>", self._on_right_click)
+        self._tree.bind("<Button-2>", self._on_right_click)
+        self._tree.bind("<Control-Button-1>", self._on_right_click)
 
         # Tooltip
         self._tree.bind("<Motion>", self._on_motion)

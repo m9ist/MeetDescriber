@@ -17,9 +17,30 @@ from tkinter import scrolledtext, ttk
 from typing import Optional
 
 import config
+from app.ui.mac_window import harden_for_mac
 from app.ui.user_actions import log_action
 
 log = logging.getLogger(__name__)
+
+
+# Thread-safe планировщик: App._schedule(fn, delay_ms=0). На Mac обязателен,
+# иначе вызовы tkinter из worker-потоков (subprocess.run и т.д.) проваливаются
+# без ошибки — диалог замирает.
+_schedule_app: Optional[callable] = None
+
+
+def set_schedule(schedule_fn) -> None:
+    """Регистрирует App._schedule. Вызывать из App.__init__()."""
+    global _schedule_app
+    _schedule_app = schedule_fn
+
+
+def _safe_after(win: tk.Toplevel, delay_ms: int, fn: callable) -> None:
+    """Безопасный замен win.after для worker-потоков на Mac."""
+    if _schedule_app is not None:
+        _schedule_app(fn, delay_ms)
+    else:
+        win.after(delay_ms, fn)
 
 
 # Virtual Key Codes (Windows-стиль, но tk.event.keycode совпадает на Win + Linux).
@@ -182,7 +203,10 @@ class ClaudeManualDialog:
         win.title(f"for_meets — {stage}")
         win.resizable(False, False)
         win.attributes("-topmost", True)
-        win.protocol("WM_DELETE_WINDOW", self._on_skip)
+        # На Mac WM_DELETE_WINDOW callback зовётся из NSControlTrackMouse →
+        # SIGABRT _Py_FatalError_TstateNULL. Прячем кнопку закрытия.
+        if not config.IS_MAC:
+            win.protocol("WM_DELETE_WINDOW", self._on_skip)
         self._win = win
 
         pad = {"padx": 14, "pady": 4}
@@ -270,7 +294,7 @@ class ClaudeManualDialog:
 
         tk.Button(
             bottom_frame,
-            text="Пропустить этот этап",
+            text="Закрыть окно",
             command=self._on_skip,
             **_btn_kw,
         ).pack(side="right")
@@ -282,6 +306,9 @@ class ClaudeManualDialog:
         w = win.winfo_width()
         h = win.winfo_height()
         win.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
+
+        # На Mac убираем кнопку закрытия (WM_DELETE_WINDOW → SIGABRT)
+        harden_for_mac(win)
 
     def _on_run(self) -> None:
         log_action("dialog_claude_run", stage=self._stage)
@@ -319,13 +346,14 @@ class ClaudeManualDialog:
                     # Claude записал файл сам через Write/Edit.
                     # Отправляем STAGE_DONE — pipeline не перезаписывает файл stdout-ом.
                     self._queue.put(self.STAGE_DONE)
-                    self._win.after(0, self._win.destroy)
+                    _safe_after(self._win, 0, self._win.destroy)
                 else:
                     err = r.stderr.decode("utf-8", errors="replace")[:200]
                     log.error("claude failed [%s] rc=%d stderr: %s", self._stage, r.returncode, err)
-                    self._win.after(0, lambda: self._run_failed(f"rc={r.returncode}: {err}"))
+                    _safe_after(self._win, 0, lambda: self._run_failed(f"rc={r.returncode}: {err}"))
             except Exception as e:
-                self._win.after(0, lambda: self._run_failed(str(e)))
+                log.error("claude worker exception [%s]: %s", self._stage, e, exc_info=True)
+                _safe_after(self._win, 0, lambda: self._run_failed(str(e)))
 
         threading.Thread(target=worker, daemon=True).start()
 

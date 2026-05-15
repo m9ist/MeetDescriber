@@ -38,6 +38,21 @@ def _schedule(fn: Callable, delay_ms: int = 0) -> None:
         _root.after(delay_ms, fn)
 
 
+def _btn_kwargs(bg: str, fg: str, bold: bool = False) -> dict:
+    """Стиль кнопки. На Mac Aqua-тема игнорирует bg/fg/relief — используем дефолт."""
+    if config.IS_MAC:
+        return {
+            "font": (config.UI_FONT, 11, "bold") if bold else (config.UI_FONT, 11),
+            "cursor": "hand2",
+        }
+    return {
+        "bg": bg, "fg": fg,
+        "relief": "flat", "padx": 10, "pady": 4,
+        "cursor": "hand2",
+        "font": (config.UI_FONT, 9, "bold") if bold else (config.UI_FONT, 9),
+    }
+
+
 # ── Запись началась ─────────────────────────────────────────────────────────
 
 def recording_started(meeting_title: str, on_skip: Callable[[], None]) -> None:
@@ -78,10 +93,7 @@ def _show_recording_started(meeting_title: str, on_skip: Callable[[], None]) -> 
     tk.Button(
         frame, text="Не записывать эту встречу",
         command=skip,
-        bg="#444444", fg="#ffffff",
-        relief="flat", padx=8, pady=4,
-        cursor="hand2",
-        font=(config.UI_FONT, 9),
+        **_btn_kwargs(bg="#444444", fg="#ffffff"),
     ).pack(anchor="w")
 
     def _auto_dismiss():
@@ -149,19 +161,13 @@ def _show_process_now(
     tk.Button(
         btn_frame, text="Обработать сейчас",
         command=do_process,
-        bg="#2d6a2d", fg="#ffffff",
-        relief="flat", padx=10, pady=4,
-        cursor="hand2",
-        font=(config.UI_FONT, 9, "bold"),
+        **_btn_kwargs(bg="#2d6a2d", fg="#ffffff", bold=True),
     ).pack(side="left", padx=(0, 6))
 
     tk.Button(
         btn_frame, text="Позже",
         command=do_later,
-        bg="#444444", fg="#cccccc",
-        relief="flat", padx=10, pady=4,
-        cursor="hand2",
-        font=(config.UI_FONT, 9),
+        **_btn_kwargs(bg="#444444", fg="#cccccc"),
     ).pack(side="left")
 
     def _auto_dismiss_process_later():

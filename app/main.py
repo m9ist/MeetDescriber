@@ -92,8 +92,9 @@ class App:
         self._root.report_callback_exception = self._on_tk_error
         notifications.set_root(self._root)
         notifications.set_schedule(self._schedule)
+        dialogs.set_schedule(self._schedule)
 
-        self._spectrum = SpectrumWidget(self._root)
+        self._spectrum = SpectrumWidget(self._root, schedule_fn=self._schedule)
 
         # Tray
         self._tray = tray_module.ForMeetsTray(
@@ -267,20 +268,16 @@ class App:
 
         self._capture = AudioCapture(session_dir=session_dir)
         self._capture.on_error = lambda e: log.error("capture error: %s", e, exc_info=e)
-        # На Mac спектр-виджет отключён: его tick 20Hz через root.after()
-        # ловит SIGABRT когда NSMenuTrackingSession (клик в трей) запускает
-        # вложенный NSApp loop поверх Tk background loop → tstate=NULL.
-        if not config.IS_MAC:
-            self._capture.on_audio_frame = self._spectrum.push_frame
+        self._capture.on_audio_frame = self._spectrum.push_frame
         self._capture.start(device_index=device_index)
 
-        if not config.IS_MAC:
-            # Обновляем формат в спектре после старта (rate/channels известны из потока)
-            def _update_spectrum_fmt():
-                if self._capture:
-                    self._spectrum.set_format(self._capture._rate, self._capture._channels)
-            self._root.after(300, _update_spectrum_fmt)
-            self._spectrum.show()
+        # Обновляем формат в спектре после старта (rate/channels известны из потока)
+        def _update_spectrum_fmt():
+            if self._capture:
+                self._spectrum.set_format(self._capture._rate, self._capture._channels)
+        self._schedule(_update_spectrum_fmt, 300)
+
+        self._spectrum.show()
         self._tray.set_recording(True, self._current_title)
 
     def _stop_and_offer_processing(self) -> None:
@@ -293,8 +290,7 @@ class App:
         self._capture.stop()
         self._capture = None
         log.info("capture stopped")
-        if not config.IS_MAC:
-            self._spectrum.hide()
+        self._spectrum.hide()
 
         session_id = self._current_session_id
         title = self._current_title
