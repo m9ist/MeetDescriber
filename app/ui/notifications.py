@@ -12,6 +12,7 @@ import config
 from app.ui.user_actions import log_action
 
 _root: Optional[tk.Tk] = None
+_schedule_app: Optional[Callable] = None  # App._schedule(fn, delay_ms=0)
 
 
 def set_root(root: tk.Tk) -> None:
@@ -20,9 +21,21 @@ def set_root(root: tk.Tk) -> None:
     _root = root
 
 
-def _schedule(fn: Callable) -> None:
-    if _root:
-        _root.after(0, fn)
+def set_schedule(schedule_fn: Callable) -> None:
+    """Устанавливает thread-safe планировщик App._schedule(fn, delay_ms=0).
+
+    На Mac обязательно — без него используется root.after, который небезопасен
+    при NSMenu-tracking (SIGABRT _Py_FatalError_TstateNULL).
+    """
+    global _schedule_app
+    _schedule_app = schedule_fn
+
+
+def _schedule(fn: Callable, delay_ms: int = 0) -> None:
+    if _schedule_app:
+        _schedule_app(fn, delay_ms)
+    elif _root:
+        _root.after(delay_ms, fn)
 
 
 # ── Запись началась ─────────────────────────────────────────────────────────
@@ -71,7 +84,13 @@ def _show_recording_started(meeting_title: str, on_skip: Callable[[], None]) -> 
         font=(config.UI_FONT, 9),
     ).pack(anchor="w")
 
-    win.after(9000, lambda: win.destroy() if win.winfo_exists() else None)
+    def _auto_dismiss():
+        try:
+            if win.winfo_exists():
+                win.destroy()
+        except tk.TclError:
+            pass
+    _schedule(_auto_dismiss, 9000)
 
 
 # ── Обработать сейчас? ───────────────────────────────────────────────────────
@@ -145,7 +164,13 @@ def _show_process_now(
         font=(config.UI_FONT, 9),
     ).pack(side="left")
 
-    win.after(30000, lambda: (do_later(), None) if win.winfo_exists() else None)
+    def _auto_dismiss_process_later():
+        try:
+            if win.winfo_exists():
+                do_later()
+        except tk.TclError:
+            pass
+    _schedule(_auto_dismiss_process_later, 30000)
 
 
 # ── Утилиты ──────────────────────────────────────────────────────────────────

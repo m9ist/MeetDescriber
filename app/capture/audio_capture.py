@@ -1,8 +1,8 @@
 """
-Захват системного аудио.
+Захват системного аудио + микрофона.
 
-Windows: PyAudioWPatch WASAPI loopback
-Mac:     sounddevice + BlackHole
+Windows: PyAudioWPatch WASAPI loopback + микрофон (микс)
+Mac:     sounddevice (BlackHole loopback + микрофон, микс)
 
 Работает в фоновом потоке. Буферизует аудио чанками по CHUNK_DURATION_SEC секунд.
 Для каждого чанка:
@@ -336,9 +336,13 @@ class AudioCapture:
         raise RuntimeError("WASAPI loopback устройство не найдено")
 
     def _capture_blackhole(self, device_index: Optional[int]) -> None:
+        import logging
         import sounddevice as sd
 
+        log = logging.getLogger(__name__)
         devices = sd.query_devices()
+
+        # Loopback: BlackHole
         if device_index is None:
             bh = next((i for i, d in enumerate(devices) if "BlackHole" in d["name"]), None)
             if bh is None:
@@ -348,39 +352,139 @@ class AudioCapture:
         self._rate = 48000
         self._channels = 2
         frames_per_chunk = int(self._rate * config.CHUNK_DURATION_SEC)
-        buffer: list[bytes] = []
-        frames_buffered = 0
+        bh_sample_size = 2 * self._channels  # bytes на фрейм
 
-        def callback(indata, frames, time_info, status):
-            nonlocal frames_buffered
+        # Микрофон: дефолтный системный input (не BlackHole)
+        mic_idx, mic_channels = self._find_mac_mic(devices)
+        if mic_idx is not None:
+            log.info("mic: [%d] %s (%dch)", mic_idx, devices[mic_idx]["name"], mic_channels)
+        else:
+            log.warning("mic не найден — записываем только BlackHole loopback")
+        log.info("BlackHole: [%d] %s @ %dHz, %dch",
+                 device_index, devices[device_index]["name"], self._rate, self._channels)
+
+        mc_sample_size = 2 * mic_channels
+        bh_buf = bytearray()
+        mc_buf = bytearray()
+        buf_lock = threading.Lock()
+
+        def bh_callback(indata, frames, time_info, status):
             if not self._recording:
                 raise sd.CallbackStop()
-            raw = indata.copy().tobytes()
+            with buf_lock:
+                bh_buf.extend(indata.tobytes())
+
+        def mc_callback(indata, frames, time_info, status):
+            if not self._recording:
+                raise sd.CallbackStop()
+            raw = indata.tobytes()
+            with buf_lock:
+                mc_buf.extend(raw)
             if self.on_audio_frame:
                 self.on_audio_frame(raw)
-            buffer.append(raw)
-            frames_buffered += frames
-            if frames_buffered >= frames_per_chunk:
-                self._process_chunk(b"".join(buffer))
-                buffer.clear()
-                frames_buffered = 0
 
-        with sd.InputStream(
-            device=device_index,
-            channels=self._channels,
-            samplerate=self._rate,
-            dtype="int16",
-            blocksize=1024,
-            callback=callback,
-        ):
+        def flush_chunk():
+            """Снимает накопленное и микширует mic + BlackHole."""
+            with buf_lock:
+                if mic_idx is not None:
+                    mc_data = bytes(mc_buf)
+                    mc_buf.clear()
+                    mc_frames = len(mc_data) // mc_sample_size
+                    # BlackHole обрезается до длительности микрофона — иначе дрейф
+                    bh_take = mc_frames * bh_sample_size
+                    bh_data = bytes(bh_buf[:bh_take])
+                    del bh_buf[:bh_take]
+                else:
+                    bh_data = bytes(bh_buf)
+                    bh_buf.clear()
+                    mc_data = b""
+            if mc_data:
+                mixed = _mix_audio(bh_data, mc_data, self._channels, mic_channels)
+            else:
+                mixed = bh_data
+            if mixed:
+                bh_rms = _calc_rms(bh_data) if bh_data else 0
+                mc_rms = _calc_rms(mc_data) if mc_data else 0
+                log.info("flush: bh=%d frames (RMS=%.1f), mc=%d frames (RMS=%.1f)",
+                         len(bh_data) // bh_sample_size, bh_rms,
+                         len(mc_data) // mc_sample_size if mc_data else 0, mc_rms)
+                # Warning если loopback пустой — обычно значит system output != BlackHole
+                if bh_rms < 10 and mc_rms > 100:
+                    log.warning("BlackHole тишина (RMS=%.1f) при наличии mic-аудио. "
+                                "Проверь System Settings → Sound → Output: должен быть "
+                                "BlackHole 2ch или Multi-Output Device с BlackHole.", bh_rms)
+                self._process_chunk(mixed)
+
+        bh_stream = sd.InputStream(
+            device=device_index, channels=self._channels, samplerate=self._rate,
+            dtype="int16", blocksize=1024, callback=bh_callback,
+        )
+        mic_stream = None
+        if mic_idx is not None:
+            try:
+                mic_stream = sd.InputStream(
+                    device=mic_idx, channels=mic_channels, samplerate=self._rate,
+                    dtype="int16", blocksize=1024, callback=mc_callback,
+                )
+            except Exception as e:
+                log.warning("mic stream failed at %dHz: %s — only BlackHole", self._rate, e)
+                mic_stream = None
+                mic_idx = None
+
+        try:
+            bh_stream.start()
+            if mic_stream:
+                mic_stream.start()
+
+            # Тайминг ведёт mic (если есть), иначе BlackHole
             while self._recording:
                 threading.Event().wait(0.1)
+                with buf_lock:
+                    if mic_idx is not None:
+                        frames_have = len(mc_buf) // mc_sample_size
+                    else:
+                        frames_have = len(bh_buf) // bh_sample_size
+                if frames_have >= frames_per_chunk:
+                    flush_chunk()
 
-        if buffer:
-            self._process_chunk(b"".join(buffer))
+            # Финальный сброс при остановке (может быть < chunk_duration)
+            flush_chunk()
+        finally:
+            for s in (bh_stream, mic_stream):
+                if s is not None:
+                    try:
+                        s.stop()
+                        s.close()
+                    except Exception:
+                        pass
+
+    def _find_mac_mic(self, devices) -> tuple[Optional[int], int]:
+        """Возвращает (index, channels) дефолтного микрофона на Mac, исключая BlackHole."""
+        import sounddevice as sd
+        # Default input — sd.default.device может быть int, list, или _InputOutputPair
+        try:
+            default_in = int(sd.default.device[0])
+        except (TypeError, IndexError):
+            try:
+                default_in = int(sd.default.device)
+            except (TypeError, ValueError):
+                default_in = -1
+        if default_in >= 0:
+            d = devices[default_in]
+            if "BlackHole" not in d["name"] and d.get("max_input_channels", 0) > 0:
+                return default_in, min(int(d["max_input_channels"]), 2)
+        # Любой не-BlackHole input
+        for i, d in enumerate(devices):
+            if d.get("max_input_channels", 0) > 0 and "BlackHole" not in d["name"]:
+                return i, min(int(d["max_input_channels"]), 2)
+        return None, 1
 
     def _process_chunk(self, raw: bytes) -> None:
+        import logging
+        log = logging.getLogger(__name__)
+
         rms = _calc_rms(raw)
+        duration_sec = len(raw) / (2 * self._channels * self._rate) if self._rate else 0
         is_silent = rms < config.SILENCE_THRESHOLD_RMS
 
         if not is_silent and not self._audio_active:
@@ -393,12 +497,15 @@ class AudioCapture:
                 self.on_audio_stopped()
 
         if is_silent:
+            log.info("chunk discarded: silent (RMS=%.1f < %d, %.2fs)",
+                     rms, config.SILENCE_THRESHOLD_RMS, duration_sec)
             return
 
         idx = self._chunk_index
         self._chunk_index += 1
         path = self.session_dir / f"chunk_{idx:04d}.wav"
         _save_wav(path, raw, self._rate, self._channels, self._sample_width)
+        log.info("chunk saved: %s (RMS=%.1f, %.2fs)", path.name, rms, duration_sec)
 
         if self.on_chunk_saved:
             self.on_chunk_saved(path, idx)

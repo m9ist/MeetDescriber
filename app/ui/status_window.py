@@ -46,7 +46,13 @@ class ProcessingStatusWindow:
         self._meeting_title = title
         # На Mac root.after() из фонового потока падает с "main thread is not in main loop".
         # Передаём thread-safe schedule_fn (app._schedule) если есть, иначе root.after.
-        self._schedule = schedule_fn if schedule_fn else lambda fn: root.after(0, fn)
+        # schedule_fn принимает (fn, delay_ms=0) для отложенных вызовов.
+        if schedule_fn is not None:
+            self._schedule = schedule_fn
+        else:
+            def _default_schedule(fn, delay_ms: int = 0):
+                root.after(delay_ms, fn)
+            self._schedule = _default_schedule
         self._cancel_event = cancel_event
         self._win: Optional[tk.Toplevel] = None
         self._stage_var: Optional[tk.StringVar] = None
@@ -210,12 +216,15 @@ class ProcessingStatusWindow:
                 self._progressbar.start(50)
 
     def _tick(self) -> None:
-        if not self._win or not self._win.winfo_exists():
+        try:
+            if not self._win or not self._win.winfo_exists():
+                return
+        except tk.TclError:
             return
         if self._spinning and self._spinner_var:
             self._spinner_var.set(SPINNER[self._spinner_idx % len(SPINNER)])
             self._spinner_idx += 1
-        self._root.after(100, self._tick)
+        self._schedule(self._tick, 100)
 
     def _on_cancel(self) -> None:
         log_action("status_window_cancel", meeting_title=self._meeting_title)

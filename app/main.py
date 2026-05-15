@@ -91,6 +91,7 @@ class App:
         self._root.title("for_meets")
         self._root.report_callback_exception = self._on_tk_error
         notifications.set_root(self._root)
+        notifications.set_schedule(self._schedule)
 
         self._spectrum = SpectrumWidget(self._root)
 
@@ -222,18 +223,24 @@ class App:
         log.info("_on_stop_manual called")
         self._schedule(self._stop_and_offer_processing)
 
-    def _schedule(self, fn) -> None:
-        """Thread-safe планировщик для tkinter-операций.
+    def _schedule(self, fn, delay_ms: int = 0) -> None:
+        """Thread-safe планировщик для tkinter-операций с опциональной задержкой.
 
-        На Mac: PyObjC callbacks вызываются из NSApplication event loop;
-        прямой вызов root.after() из них ненадёжен — кладём в очередь,
-        которую опрашивает главный цикл.
-        На Windows: напрямую root.after(0, fn).
+        На Mac: всё идёт через _mac_queue, который дренируется main loop'ом.
+        root.after() небезопасен — Tk регистрирует _runBackgroundLoop, который
+        может выстрелить во время NSMenuTrackingSession и сломать GIL state.
+        Для delay_ms>0 используем threading.Timer → put в очередь.
+        На Windows: root.after(delay_ms, fn) — стандартный путь.
         """
         if config.IS_MAC:
-            self._mac_queue.put(fn)
+            if delay_ms > 0:
+                t = threading.Timer(delay_ms / 1000.0, lambda: self._mac_queue.put(fn))
+                t.daemon = True
+                t.start()
+            else:
+                self._mac_queue.put(fn)
         else:
-            self._root.after(0, fn)
+            self._root.after(delay_ms, fn)
 
     # ── Сессия ────────────────────────────────────────────────────────────────
 
@@ -260,16 +267,20 @@ class App:
 
         self._capture = AudioCapture(session_dir=session_dir)
         self._capture.on_error = lambda e: log.error("capture error: %s", e, exc_info=e)
-        self._capture.on_audio_frame = self._spectrum.push_frame
+        # На Mac спектр-виджет отключён: его tick 20Hz через root.after()
+        # ловит SIGABRT когда NSMenuTrackingSession (клик в трей) запускает
+        # вложенный NSApp loop поверх Tk background loop → tstate=NULL.
+        if not config.IS_MAC:
+            self._capture.on_audio_frame = self._spectrum.push_frame
         self._capture.start(device_index=device_index)
 
-        # Обновляем формат в спектре после старта (rate/channels известны из потока)
-        def _update_spectrum_fmt():
-            if self._capture:
-                self._spectrum.set_format(self._capture._rate, self._capture._channels)
-        self._root.after(300, _update_spectrum_fmt)
-
-        self._spectrum.show()
+        if not config.IS_MAC:
+            # Обновляем формат в спектре после старта (rate/channels известны из потока)
+            def _update_spectrum_fmt():
+                if self._capture:
+                    self._spectrum.set_format(self._capture._rate, self._capture._channels)
+            self._root.after(300, _update_spectrum_fmt)
+            self._spectrum.show()
         self._tray.set_recording(True, self._current_title)
 
     def _stop_and_offer_processing(self) -> None:
@@ -282,7 +293,8 @@ class App:
         self._capture.stop()
         self._capture = None
         log.info("capture stopped")
-        self._spectrum.hide()
+        if not config.IS_MAC:
+            self._spectrum.hide()
 
         session_id = self._current_session_id
         title = self._current_title
