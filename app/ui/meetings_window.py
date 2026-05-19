@@ -222,7 +222,9 @@ class MeetingsWindow:
             duration = _fmt_duration(m.get("duration_sec"))
             status = STATUS_RU.get(m.get("status") or "", m.get("status") or "—")
             audio_dir = config.RECORDINGS_DIR / f"session_{session_id}"
-            audio = "✓" if audio_dir.exists() and any(audio_dir.iterdir()) else ""
+            # Показываем номер сессии — по нему пользователь находит папку
+            # data/recordings/session_<N>/ чтобы физически послушать.
+            audio = str(session_id) if audio_dir.exists() and any(audio_dir.iterdir()) else ""
             self._tree.insert(
                 "",
                 "end",
