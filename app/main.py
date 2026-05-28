@@ -269,6 +269,7 @@ class App:
         self._capture = AudioCapture(session_dir=session_dir)
         self._capture.on_error = lambda e: log.error("capture error: %s", e, exc_info=e)
         self._capture.on_audio_frame = self._spectrum.push_frame
+        self._capture.on_drift_warning = lambda d: notifications.mic_drift_warning(d)
         self._capture.start(device_index=device_index)
 
         # Обновляем формат в спектре после старта (rate/channels известны из потока)

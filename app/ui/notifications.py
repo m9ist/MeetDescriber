@@ -105,6 +105,51 @@ def _show_recording_started(meeting_title: str, on_skip: Callable[[], None]) -> 
     _schedule(_auto_dismiss, 9000)
 
 
+# ── Алерт: дрейф микрофона ───────────────────────────────────────────────────
+
+def mic_drift_warning(drift_sec: float) -> None:
+    """Показывает toast «Микрофон лагает». Срабатывает из audio_capture когда
+    mic_stream.read() блокируется существенно дольше реального времени."""
+    _schedule(lambda: _show_mic_drift(drift_sec))
+
+
+def _show_mic_drift(drift_sec: float) -> None:
+    win = tk.Toplevel(_root)
+    win.title("")
+    win.resizable(False, False)
+    win.attributes("-topmost", True)
+    win.overrideredirect(True)
+
+    _position_bottom_right(win, w=320, h=80, offset_y=130)
+
+    frame = tk.Frame(win, bg="#3a1f1f", padx=14, pady=10)
+    frame.pack(fill="both", expand=True)
+
+    tk.Label(
+        frame, text="⚠ Микрофон лагает",
+        bg="#3a1f1f", fg="#ff8888",
+        font=(config.UI_FONT, 11, "bold"),
+        anchor="w",
+    ).pack(fill="x")
+
+    tk.Label(
+        frame,
+        text=f"Mic отстаёт от системного звука на {abs(drift_sec):.0f}с.\n"
+             f"Возможно, mic захватило другое приложение.",
+        bg="#3a1f1f", fg="#cc9999",
+        font=(config.UI_FONT, 9),
+        anchor="w", justify="left",
+    ).pack(fill="x", pady=(4, 0))
+
+    def _auto_dismiss():
+        try:
+            if win.winfo_exists():
+                win.destroy()
+        except tk.TclError:
+            pass
+    _schedule(_auto_dismiss, 8000)
+
+
 # ── Обработать сейчас? ───────────────────────────────────────────────────────
 
 def process_now(

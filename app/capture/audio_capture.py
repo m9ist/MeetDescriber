@@ -28,6 +28,11 @@ OnAudioStarted = Callable[[], None]
 OnAudioStopped = Callable[[], None]
 OnError = Callable[[Exception], None]
 
+# Порог дрейфа mic↔loopback (сек), после которого пользователю показываем алерт.
+# В норме diff ~ 0.2-0.3 сек; при mic-stuck — 50-120 сек.
+DRIFT_WARN_THRESHOLD_SEC = 5.0
+DRIFT_WARN_COOLDOWN_SEC = 60.0   # throttling, чтобы не спамить
+
 
 class AudioCapture:
     """
@@ -52,6 +57,12 @@ class AudioCapture:
         self.on_audio_stopped: Optional[OnAudioStopped] = None
         self.on_error: Optional[OnError] = None
         self.on_audio_frame: Optional[Callable[[bytes], None]] = None
+        # on_drift_warning(drift_seconds): срабатывает когда mic отстаёт от
+        # loopback больше чем DRIFT_WARN_THRESHOLD_SEC. Симптом hyper-блокирующего
+        # mic_stream.read() — другое приложение держит mic exclusive, либо
+        # USB-драйвер сваливается в throttling.
+        self.on_drift_warning: Optional[Callable[[float], None]] = None
+        self._last_drift_warn_t: float = 0.0  # для throttling уведомлений
 
         self._recording = False
         self._audio_active = False
@@ -208,10 +219,27 @@ class AudioCapture:
                     lb_frames_raw = len(lb_bytes) // (2 * self._channels)
                     mc_frames_raw = len(mc_bytes) // (2 * mic_channels)
                     diff = lb_frames_raw - mc_frames_raw
+                    diff_sec = diff / self._rate
                     log.debug(
                         "flush: lb=%d frames, mc=%d frames, diff=%+d frames (%.3fs)",
-                        lb_frames_raw, mc_frames_raw, diff, diff / self._rate,
+                        lb_frames_raw, mc_frames_raw, diff, diff_sec,
                     )
+                    # Алерт: mic отстаёт от loopback >5 сек → значит mic блокировался
+                    # дольше нормы (другая программа держит mic exclusive / USB lag).
+                    # Throttling: не чаще раза в 60 сек на сессию.
+                    if abs(diff_sec) > DRIFT_WARN_THRESHOLD_SEC and self.on_drift_warning:
+                        _now = time.monotonic()
+                        if _now - self._last_drift_warn_t > DRIFT_WARN_COOLDOWN_SEC:
+                            self._last_drift_warn_t = _now
+                            log.warning(
+                                "mic drift detected: %+.1fs (lb=%d, mc=%d frames) — "
+                                "вероятно другое приложение держит mic exclusive",
+                                diff_sec, lb_frames_raw, mc_frames_raw,
+                            )
+                            try:
+                                self.on_drift_warning(diff_sec)
+                            except Exception:
+                                log.exception("on_drift_warning callback failed")
                     # Обрезаем lb до длины mc, чтобы любой дрейф не добавлял тишину в конец
                     mc_frames_count = len(mc_bytes) // (2 * mic_channels)
                     lb_bytes = lb_bytes[: mc_frames_count * self._channels * 2]
