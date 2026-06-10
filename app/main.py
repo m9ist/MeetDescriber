@@ -17,6 +17,7 @@
 import sys
 import io
 import faulthandler
+import json
 import logging
 import queue
 import threading
@@ -65,7 +66,7 @@ for _noisy in ("numba", "httpcore", "httpx", "urllib3"):
 from app.storage.db import init_db, get_conn, update_session, update_job_paths
 from app.storage.file_manager import rename_session_docs
 from app.capture.audio_capture import AudioCapture
-from app.extension.native_host import NativeHost, read_message, send_message
+from app.extension.native_host import BRIDGE_HOST, BRIDGE_PORT
 from app.ui import notifications, tray as tray_module, dialogs
 from app.ui.spectrum import SpectrumWidget
 from app.ui.status_window import ProcessingStatusWindow
@@ -109,20 +110,22 @@ class App:
             on_open_meetings_window=self._on_open_meetings_window,
         )
 
-        # Native host thread
-        self._host = NativeHost()
-        self._host.on("meet_started", self._handle_meet_started)
-        self._host.on("meet_ended", self._handle_meet_ended)
-        self._host.on("tabs", self._handle_tabs)
-        self._host.on("ping", lambda msg: {"type": "pong"})
+        # События от Chrome-расширения приходят через TCP-мост: Chrome запускает
+        # standalone-хост (app/extension/native_host.py → for_meets_host.exe),
+        # который пересылает meet_started/meet_ended/tabs на 127.0.0.1:BRIDGE_PORT.
+        self._bridge_handlers: dict = {
+            "meet_started": self._handle_meet_started,
+            "meet_ended": self._handle_meet_ended,
+            "tabs": self._handle_tabs,
+        }
 
     # ── Запуск ────────────────────────────────────────────────────────────────
 
     def run(self) -> None:
         threading.Thread(
-            target=self._host.run,
+            target=self._run_bridge_server,
             daemon=True,
-            name="native-host",
+            name="ext-bridge",
         ).start()
 
         self._refresh_tray_jobs()
@@ -173,6 +176,70 @@ class App:
             # Windows: tkinter занимает main thread, pystray — фоновый поток.
             self._tray.start()
             self._root.mainloop()
+
+    # ── Мост с Chrome-расширением ─────────────────────────────────────────────
+
+    def _run_bridge_server(self) -> None:
+        """TCP-сервер для событий от native-host'а (запущенного Chrome'ом).
+
+        Протокол: JSON-объект на строку. Хост переподключается сам при обрыве.
+        """
+        import socket
+
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            srv.bind((BRIDGE_HOST, BRIDGE_PORT))
+        except OSError:
+            # Порт занят — вероятно второй экземпляр приложения. Автостарт
+            # будет работать только в первом; логируем и не падаем.
+            log.error("bridge: port %d busy — autostart from Chrome disabled "
+                      "in this instance", BRIDGE_PORT, exc_info=True)
+            return
+        srv.listen(2)
+        log.info("bridge: listening on %s:%d", BRIDGE_HOST, BRIDGE_PORT)
+        while True:
+            try:
+                conn, addr = srv.accept()
+            except OSError:
+                log.error("bridge: accept failed", exc_info=True)
+                return
+            log.info("bridge: host connected from %s", addr)
+            threading.Thread(
+                target=self._serve_bridge_conn,
+                args=(conn,),
+                daemon=True,
+                name="ext-bridge-conn",
+            ).start()
+
+    def _serve_bridge_conn(self, conn) -> None:
+        buf = b""
+        with conn:
+            while True:
+                try:
+                    chunk = conn.recv(4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    if not line.strip():
+                        continue
+                    try:
+                        msg = json.loads(line.decode("utf-8"))
+                    except (ValueError, UnicodeDecodeError):
+                        log.warning("bridge: bad message %r", line[:200])
+                        continue
+                    handler = self._bridge_handlers.get(msg.get("type"))
+                    if handler:
+                        try:
+                            handler(msg)
+                        except Exception:
+                            log.error("bridge: handler %s failed", msg.get("type"),
+                                      exc_info=True)
+        log.info("bridge: host disconnected")
 
     # ── Обработчики Chrome ────────────────────────────────────────────────────
 

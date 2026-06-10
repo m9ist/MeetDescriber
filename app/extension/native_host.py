@@ -6,14 +6,31 @@ Native Messaging хост для Chrome-расширения.
 - stdin → читаем сообщения от Chrome
 - stdout → отправляем ответы
 
-Запускается Chrome автоматически при подключении расширения.
+Архитектура автостарта записи:
+Chrome запускает этот скрипт (PyInstaller-сборку dist/for_meets_host/
+for_meets_host.exe) как ОТДЕЛЬНЫЙ процесс при коннекте расширения.
+Tray-приложение работает само по себе — у них нет общего stdin/stdout.
+Поэтому хост пересылает события (meet_started / meet_ended / tabs)
+в приложение через локальный TCP-сокет 127.0.0.1:48765 (JSON-строки).
+Приложение поднимает сервер на этом порту (app/main.py).
+
+Если приложение не запущено — события просто дропаются (хост жив,
+Chrome не переподключается, при следующем событии попробуем снова).
+
+ВАЖНО: файл должен оставаться stdlib-only — он собирается PyInstaller'ом
+в лёгкий exe без зависимостей проекта.
 """
 
 import json
+import socket
 import struct
 import sys
-import threading
 from typing import Callable
+
+# Порт локального моста хост → tray-приложение.
+# Менять синхронно с app/main.py (он импортирует константу отсюда).
+BRIDGE_HOST = "127.0.0.1"
+BRIDGE_PORT = 48765
 
 
 def read_message() -> dict | None:
@@ -34,6 +51,42 @@ def send_message(msg: dict) -> None:
     sys.stdout.buffer.write(struct.pack("<I", len(encoded)))
     sys.stdout.buffer.write(encoded)
     sys.stdout.buffer.flush()
+
+
+class AppBridge:
+    """Пересылает сообщения в работающее tray-приложение по TCP (JSON-строки)."""
+
+    def __init__(self) -> None:
+        self._sock: socket.socket | None = None
+
+    def forward(self, msg: dict) -> bool:
+        data = (json.dumps(msg) + "\n").encode("utf-8")
+        # Две попытки: вторая — с переподключением, если сокет протух
+        # (приложение перезапускалось между событиями).
+        for _ in range(2):
+            try:
+                if self._sock is None:
+                    self._sock = socket.create_connection(
+                        (BRIDGE_HOST, BRIDGE_PORT), timeout=1.0,
+                    )
+                self._sock.sendall(data)
+                return True
+            except OSError:
+                if self._sock is not None:
+                    try:
+                        self._sock.close()
+                    except OSError:
+                        pass
+                    self._sock = None
+        return False
+
+    def close(self) -> None:
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
 
 
 class NativeHost:
@@ -76,46 +129,50 @@ class NativeHost:
         self._running = False
 
 
-def run_host(
-    on_meet_started: Callable | None = None,
-    on_meet_ended: Callable | None = None,
-) -> None:
+# Типы сообщений, которые пересылаются в tray-приложение
+_FORWARDED_TYPES = ("meet_started", "meet_ended", "tabs")
+
+
+def run_host() -> None:
     """
-    Точка входа для запуска хоста.
-    Вызывается Chrome как отдельный процесс.
+    Точка входа standalone-хоста (запускается Chrome).
+    Пересылает события расширения в tray-приложение через AppBridge.
     """
+    import logging
+
+    bridge = AppBridge()
     host = NativeHost()
 
     host.on("ping", lambda msg: {"type": "pong"})
 
-    host.on("get_tabs", lambda msg: None)  # Chrome сам шлёт tabs в ответ
+    def _make_forwarder(msg_type: str) -> Callable:
+        def _handler(msg: dict):
+            ok = bridge.forward(msg)
+            logging.info("forward %s -> app: %s", msg_type, "ok" if ok else "app not running")
+            return None
+        return _handler
 
-    if on_meet_started:
-        def _meet_started(msg):
-            on_meet_started(
-                tab_id=msg.get("tab_id"),
-                title=msg.get("title", ""),
-                tabs=msg.get("tabs", []),
-            )
-        host.on("meet_started", _meet_started)
+    for t in _FORWARDED_TYPES:
+        host.on(t, _make_forwarder(t))
 
-    if on_meet_ended:
-        def _meet_ended(msg):
-            on_meet_ended(tab_id=msg.get("tab_id"))
-        host.on("meet_ended", _meet_ended)
-
-    host.run()
+    try:
+        host.run()
+    finally:
+        bridge.close()
 
 
 if __name__ == "__main__":
     import logging
     from pathlib import Path
     log_path = Path(__file__).parent / "native_host.log"
-    logging.basicConfig(
-        filename=str(log_path),
-        level=logging.DEBUG,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+    try:
+        logging.basicConfig(
+            filename=str(log_path),
+            level=logging.DEBUG,
+            format="%(asctime)s %(levelname)s %(message)s",
+        )
+    except OSError:
+        pass  # exe может лежать в read-only месте — работаем без лога
     logging.info("native_host started")
     try:
         run_host()
