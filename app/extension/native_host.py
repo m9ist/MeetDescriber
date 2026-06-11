@@ -130,7 +130,7 @@ class NativeHost:
 
 
 # Типы сообщений, которые пересылаются в tray-приложение
-_FORWARDED_TYPES = ("meet_started", "meet_ended", "tabs")
+_FORWARDED_TYPES = ("meet_started", "meet_ended", "meet_title", "tabs")
 
 
 def run_host() -> None:

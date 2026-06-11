@@ -81,6 +81,7 @@ class App:
         self._current_title: str = ""
         self._skip_tab_ids: set[int] = set()  # встречи помеченные "не записывать"
         self._latest_tabs: list[dict] = []    # последний известный список вкладок Chrome
+        self._current_tab_id: Optional[int] = None  # Meet-вкладка активной записи (для meet_title)
         # На Mac: PyObjC callbacks не могут безопасно вызывать tkinter напрямую.
         # Все tkinter-операции передаём через эту очередь и выполняем в main loop.
         self._mac_queue: queue.SimpleQueue = queue.SimpleQueue()
@@ -116,6 +117,7 @@ class App:
         self._bridge_handlers: dict = {
             "meet_started": self._handle_meet_started,
             "meet_ended": self._handle_meet_ended,
+            "meet_title": self._handle_meet_title,
             "tabs": self._handle_tabs,
         }
 
@@ -243,9 +245,22 @@ class App:
 
     # ── Обработчики Chrome ────────────────────────────────────────────────────
 
+    @staticmethod
+    def _clean_meet_title(title: str) -> str:
+        """Убирает служебный префикс из заголовка Meet-вкладки.
+
+        "Meet – Weekly Sync" → "Weekly Sync", "Meet – abc-defg-hij" → "abc-defg-hij".
+        """
+        t = (title or "").strip()
+        for prefix in ("Meet – ", "Meet — ", "Meet - "):
+            if t.startswith(prefix):
+                t = t[len(prefix):].strip()
+                break
+        return t
+
     def _handle_meet_started(self, msg: dict) -> None:
         tab_id = msg.get("tab_id")
-        title = msg.get("title", "Google Meet")
+        title = self._clean_meet_title(msg.get("title", "")) or "Google Meet"
         self._latest_tabs = msg.get("tabs", [])
 
         if tab_id in self._skip_tab_ids:
@@ -262,13 +277,42 @@ class App:
 
             # Начинаем запись (уведомление уже показано — пользователь может нажать "не записывать")
             self._start_session(title=title, source="meet")
+            # Запоминаем вкладку: на момент старта заголовок обычно ещё «Meet» —
+            # настоящее название приедет следом сообщением meet_title.
+            self._current_tab_id = tab_id
 
         self._schedule(show)
 
     def _handle_meet_ended(self, msg: dict) -> None:
         tab_id = msg.get("tab_id")
         self._skip_tab_ids.discard(tab_id)
+        self._current_tab_id = None
         self._schedule(self._stop_and_offer_processing)
+
+    def _handle_meet_title(self, msg: dict) -> None:
+        """Meet выставляет настоящее название вкладки уже после старта записи —
+        обновляем название активной сессии вдогонку."""
+        tab_id = msg.get("tab_id")
+        title = self._clean_meet_title(msg.get("title", ""))
+        if not title or title in ("Meet", "Google Meet"):
+            return
+        if tab_id != self._current_tab_id or self._current_session_id is None:
+            return
+        if not (self._capture and self._capture.is_recording):
+            return
+        if title == self._current_title:
+            return
+
+        session_id = self._current_session_id
+        log.info("meet title update: %r -> %r (session %d)",
+                 self._current_title, title, session_id)
+        self._current_title = title
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE sessions SET title=? WHERE id=?",
+                (title, session_id),
+            )
+        self._schedule(lambda: self._tray.set_recording(True, title))
 
     def _handle_tabs(self, msg: dict) -> None:
         self._latest_tabs = msg.get("tabs", [])
@@ -357,6 +401,7 @@ class App:
         log.info("stopping capture...")
         self._capture.stop()
         self._capture = None
+        self._current_tab_id = None
         log.info("capture stopped")
         self._spectrum.hide()
 

@@ -47,6 +47,16 @@ function isMeetUrl(url) {
 // Слушаем обновления вкладок
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   console.log("[for_meets] tab updated:", tabId, changeInfo.status, tab.url);
+
+  // Название Meet-вкладки меняется ПОСЛЕ полной загрузки: Meet выставляет
+  // document.title через JS (код встречи / название). Такие события приходят
+  // как changeInfo.title без status — пересылаем отдельным сообщением,
+  // чтобы приложение обновило название уже идущей записи.
+  if (changeInfo.title && meetTabs.has(tabId)) {
+    console.log("[for_meets] meet title changed:", changeInfo.title);
+    send({ type: "meet_title", tab_id: tabId, title: changeInfo.title });
+  }
+
   if (changeInfo.status !== "complete") return;
 
   const wasMeet = meetTabs.has(tabId);
