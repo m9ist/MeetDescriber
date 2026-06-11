@@ -20,6 +20,7 @@ import faulthandler
 import json
 import logging
 import queue
+import shutil
 import threading
 import tkinter as tk
 import traceback
@@ -272,6 +273,11 @@ class App:
         def show():
             def skip():
                 self._skip_tab_ids.add(tab_id)
+                # Запись уже идёт — останавливаем и удаляем сессию целиком.
+                # Guard по вкладке: если эта запись уже закончилась и началась
+                # другая, чужую сессию не трогаем.
+                if self._current_tab_id == tab_id:
+                    self._discard_current_session()
 
             notifications.recording_started(title, on_skip=skip)
 
@@ -437,6 +443,41 @@ class App:
             pass  # задание видно в трее, запустить можно оттуда
 
         notifications.process_now(title, on_process=process, on_later=later)
+
+    def _discard_current_session(self) -> None:
+        """Останавливает запись и удаляет сессию без следов (БД + аудио).
+
+        Путь «Не записывать эту встречу»: задание ещё не создано (jobs
+        появляются только в _stop_and_offer_processing), так что достаточно
+        убрать строку sessions и папку с чанками.
+        """
+        if not self._capture or not self._capture.is_recording:
+            return
+
+        log.info("discarding current session (skip recording)")
+        self._capture.stop()
+        self._capture = None
+        self._current_tab_id = None
+        self._spectrum.hide()
+
+        session_id = self._current_session_id
+        self._current_session_id = None
+        self._current_title = ""
+        self._tray.set_recording(False)
+
+        if session_id is None:
+            return
+
+        with get_conn() as conn:
+            conn.execute("DELETE FROM jobs WHERE session_id=?", (session_id,))
+            conn.execute("DELETE FROM speakers WHERE session_id=?", (session_id,))
+            conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+
+        session_dir = config.RECORDINGS_DIR / f"session_{session_id}"
+        shutil.rmtree(session_dir, ignore_errors=True)
+
+        log.info("session %d discarded: db rows and %s removed", session_id, session_dir)
+        self._refresh_tray_jobs()
 
     def _create_job(self, session_id: int) -> None:
         with get_conn() as conn:
