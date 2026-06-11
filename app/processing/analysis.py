@@ -17,6 +17,21 @@ from prompts import ANALYSIS_USER_TEMPLATE as USER_PROMPT_TEMPLATE
 log = logging.getLogger(__name__)
 
 
+def cleanup_prompt(prompt_path: Optional[Path]) -> None:
+    """Удаляет файл промпта после успешного выполнения этапа.
+
+    Промпт нужен только для ручного перезапуска; при повторном прогоне этапа
+    он генерируется заново, так что после успеха файл — мусор.
+    """
+    if prompt_path is None:
+        return
+    try:
+        prompt_path.unlink(missing_ok=True)
+        log.info("Промпт удалён: %s", prompt_path)
+    except OSError:
+        log.warning("Не удалось удалить промпт %s", prompt_path, exc_info=True)
+
+
 def _build_prompt(
     transcription_path: Path,
     title: str,
@@ -86,6 +101,7 @@ def write_analysis_md(
         raise RuntimeError("Пользователь отменил генерацию анализа")
     if result == "__STAGE_DONE__":
         log.info("Анализ: файл записан вручную, пропускаем запись → %s", path)
+        cleanup_prompt(prompt_path)
         return path
     analysis_text = result
 
@@ -94,4 +110,5 @@ def write_analysis_md(
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(header + analysis_text, encoding="utf-8")
+    cleanup_prompt(prompt_path)
     return path

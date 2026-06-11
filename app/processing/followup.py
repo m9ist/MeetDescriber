@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import config
+from app.processing.analysis import cleanup_prompt
 from prompts import FOLLOWUP_SYSTEM_PROMPT as SYSTEM_PROMPT
 from prompts import FOLLOWUP_USER_TEMPLATE as USER_PROMPT_TEMPLATE
 
@@ -75,6 +76,7 @@ def write_followup_md(
         raise RuntimeError("Пользователь отменил генерацию follow-up")
     if result == "__STAGE_DONE__":
         log.info("Follow-up: файл записан вручную, пропускаем запись → %s", path)
+        cleanup_prompt(prompt_path)
         return path
     followup_text = result
 
@@ -83,4 +85,5 @@ def write_followup_md(
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(header + followup_text, encoding="utf-8")
+    cleanup_prompt(prompt_path)
     return path
