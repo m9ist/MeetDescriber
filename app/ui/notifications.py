@@ -226,10 +226,16 @@ def _show_process_now(
 
 # ── Утилиты ──────────────────────────────────────────────────────────────────
 
-def _position_bottom_right(win: tk.Toplevel, w: int, h: int, offset_y: int = 20) -> None:
+# Правый нижний угол занят спектр-виджетом (SpectrumWidget, 300x70,
+# y = sh-130..sh-60) — тосты всегда поднимаем выше его зоны, иначе
+# REC-оверлей ложится на кнопки уведомлений.
+_SPECTRUM_CLEARANCE = 80  # высота спектра (70) + зазор (10)
+
+
+def _position_bottom_right(win: tk.Toplevel, w: int, h: int, offset_y: int = 0) -> None:
     win.update_idletasks()
     sw = win.winfo_screenwidth()
     sh = win.winfo_screenheight()
     x = sw - w - 20
-    y = sh - h - 60 - offset_y
+    y = sh - h - 60 - _SPECTRUM_CLEARANCE - offset_y
     win.geometry(f"{w}x{h}+{x}+{y}")
