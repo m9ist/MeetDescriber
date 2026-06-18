@@ -2,7 +2,8 @@
 Захват системного аудио + микрофона.
 
 Windows: PyAudioWPatch WASAPI loopback + микрофон (микс)
-Mac:     sounddevice (BlackHole loopback + микрофон, микс)
+Mac:     Core Audio Tap (через audiotee) + микрофон (микс)
+         Раньше использовался BlackHole — больше не нужен (macOS 14.4+).
 
 Работает в фоновом потоке. Буферизует аудио чанками по CHUNK_DURATION_SEC секунд.
 Для каждого чанка:
@@ -113,7 +114,7 @@ class AudioCapture:
             if config.IS_WINDOWS:
                 self._capture_wasapi(device_index)
             elif config.IS_MAC:
-                self._capture_blackhole(device_index)
+                self._capture_mac(device_index)
             else:
                 raise RuntimeError("Unsupported platform")
         except Exception as exc:
@@ -363,44 +364,53 @@ class AudioCapture:
 
         raise RuntimeError("WASAPI loopback устройство не найдено")
 
-    def _capture_blackhole(self, device_index: Optional[int]) -> None:
+    def _capture_mac(self, device_index: Optional[int]) -> None:
+        """Захват на macOS: Core Audio Tap (audiotee) для системного звука +
+        sounddevice для микрофона. Микс при сохранении чанка.
+
+        Раньше использовался BlackHole — требовал brew install + ручную настройку
+        Multi-Output Device. Tap делает то же самое нативно через Apple API.
+        """
         import logging
         import sounddevice as sd
+        from app.capture.mac_tap import MacTapCapture, is_available
 
         log = logging.getLogger(__name__)
-        devices = sd.query_devices()
 
-        # Loopback: BlackHole
-        if device_index is None:
-            bh = next((i for i, d in enumerate(devices) if "BlackHole" in d["name"]), None)
-            if bh is None:
-                raise RuntimeError("BlackHole не найден. Установи: brew install blackhole-2ch")
-            device_index = bh
+        if not is_available():
+            raise RuntimeError(
+                "Core Audio Tap недоступен. Требования: macOS 14.4+ и собранный "
+                "audiotee бинарь (bash create_mac_app.sh)."
+            )
+
+        devices = sd.query_devices()
 
         self._rate = 48000
         self._channels = 2
         frames_per_chunk = int(self._rate * config.CHUNK_DURATION_SEC)
-        bh_sample_size = 2 * self._channels  # bytes на фрейм
+        tap_sample_size = 2 * self._channels  # bytes на фрейм
 
-        # Микрофон: дефолтный системный input (не BlackHole)
+        # Микрофон: дефолтный системный input
         mic_idx, mic_channels = self._find_mac_mic(devices)
         if mic_idx is not None:
             log.info("mic: [%d] %s (%dch)", mic_idx, devices[mic_idx]["name"], mic_channels)
         else:
-            log.warning("mic не найден — записываем только BlackHole loopback")
-        log.info("BlackHole: [%d] %s @ %dHz, %dch",
-                 device_index, devices[device_index]["name"], self._rate, self._channels)
+            log.warning("mic не найден — записываем только системный звук")
+        log.info("system audio: Core Audio Tap @ %dHz, %dch", self._rate, self._channels)
 
         mc_sample_size = 2 * mic_channels
-        bh_buf = bytearray()
+        tap_buf = bytearray()
         mc_buf = bytearray()
         buf_lock = threading.Lock()
 
-        def bh_callback(indata, frames, time_info, status):
-            if not self._recording:
-                raise sd.CallbackStop()
+        def tap_on_frame(raw: bytes) -> None:
             with buf_lock:
-                bh_buf.extend(indata.tobytes())
+                tap_buf.extend(raw)
+
+        def tap_on_error(exc: Exception) -> None:
+            log.error("audiotee error: %s", exc)
+            if self.on_error:
+                self.on_error(exc)
 
         def mc_callback(indata, frames, time_info, status):
             if not self._recording:
@@ -412,41 +422,49 @@ class AudioCapture:
                 self.on_audio_frame(raw)
 
         def flush_chunk():
-            """Снимает накопленное и микширует mic + BlackHole."""
+            """Снимает накопленное и микширует mic + tap."""
             with buf_lock:
                 if mic_idx is not None:
                     mc_data = bytes(mc_buf)
                     mc_buf.clear()
                     mc_frames = len(mc_data) // mc_sample_size
-                    # BlackHole обрезается до длительности микрофона — иначе дрейф
-                    bh_take = mc_frames * bh_sample_size
-                    bh_data = bytes(bh_buf[:bh_take])
-                    del bh_buf[:bh_take]
+                    # Tap обрезается до длительности микрофона — иначе дрейф
+                    tap_take = mc_frames * tap_sample_size
+                    tap_data = bytes(tap_buf[:tap_take])
+                    del tap_buf[:tap_take]
                 else:
-                    bh_data = bytes(bh_buf)
-                    bh_buf.clear()
+                    tap_data = bytes(tap_buf)
+                    tap_buf.clear()
                     mc_data = b""
             if mc_data:
-                mixed = _mix_audio(bh_data, mc_data, self._channels, mic_channels)
+                mixed = _mix_audio(tap_data, mc_data, self._channels, mic_channels)
             else:
-                mixed = bh_data
+                mixed = tap_data
             if mixed:
-                bh_rms = _calc_rms(bh_data) if bh_data else 0
+                tap_rms = _calc_rms(tap_data) if tap_data else 0
                 mc_rms = _calc_rms(mc_data) if mc_data else 0
-                log.info("flush: bh=%d frames (RMS=%.1f), mc=%d frames (RMS=%.1f)",
-                         len(bh_data) // bh_sample_size, bh_rms,
+                log.info("flush: tap=%d frames (RMS=%.1f), mc=%d frames (RMS=%.1f)",
+                         len(tap_data) // tap_sample_size, tap_rms,
                          len(mc_data) // mc_sample_size if mc_data else 0, mc_rms)
-                # Warning если loopback пустой — обычно значит system output != BlackHole
-                if bh_rms < 10 and mc_rms > 100:
-                    log.warning("BlackHole тишина (RMS=%.1f) при наличии mic-аудио. "
-                                "Проверь System Settings → Sound → Output: должен быть "
-                                "BlackHole 2ch или Multi-Output Device с BlackHole.", bh_rms)
+                # Warning если tap молчит — обычно permission не выдано
+                if tap_rms < 10 and mc_rms > 100:
+                    log.warning(
+                        "Системный звук молчит (RMS=%.1f) при наличии mic. "
+                        "Проверь System Settings → Privacy & Security → "
+                        "System Audio Recording — должно быть разрешение MeetDescriber.",
+                        tap_rms,
+                    )
                 self._process_chunk(mixed)
 
-        bh_stream = sd.InputStream(
-            device=device_index, channels=self._channels, samplerate=self._rate,
-            dtype="int16", blocksize=1024, callback=bh_callback,
+        # Core Audio Tap для системного звука
+        tap = MacTapCapture(
+            sample_rate=self._rate,
+            stereo=(self._channels == 2),
+            chunk_duration_sec=0.2,
         )
+        tap.on_frame = tap_on_frame
+        tap.on_error = tap_on_error
+
         mic_stream = None
         if mic_idx is not None:
             try:
@@ -455,40 +473,55 @@ class AudioCapture:
                     dtype="int16", blocksize=1024, callback=mc_callback,
                 )
             except Exception as e:
-                log.warning("mic stream failed at %dHz: %s — only BlackHole", self._rate, e)
+                log.warning("mic stream failed at %dHz: %s — only system audio", self._rate, e)
                 mic_stream = None
                 mic_idx = None
 
         try:
-            bh_stream.start()
+            tap.start(include_pids=None)  # Тапаем все процессы (можно указать PID Chrome)
             if mic_stream:
                 mic_stream.start()
 
-            # Тайминг ведёт mic (если есть), иначе BlackHole
+            # Тайминг ведёт mic (если есть), иначе tap
             while self._recording:
                 threading.Event().wait(0.1)
                 with buf_lock:
                     if mic_idx is not None:
                         frames_have = len(mc_buf) // mc_sample_size
                     else:
-                        frames_have = len(bh_buf) // bh_sample_size
+                        frames_have = len(tap_buf) // tap_sample_size
                 if frames_have >= frames_per_chunk:
                     flush_chunk()
 
             # Финальный сброс при остановке (может быть < chunk_duration)
             flush_chunk()
         finally:
-            for s in (bh_stream, mic_stream):
-                if s is not None:
-                    try:
-                        s.stop()
-                        s.close()
-                    except Exception:
-                        pass
+            tap.stop()
+            if mic_stream is not None:
+                try:
+                    mic_stream.stop()
+                    mic_stream.close()
+                except Exception:
+                    pass
 
     def _find_mac_mic(self, devices) -> tuple[Optional[int], int]:
-        """Возвращает (index, channels) дефолтного микрофона на Mac, исключая BlackHole."""
+        """Возвращает (index, channels) дефолтного микрофона на Mac.
+
+        Исключает BlackHole (legacy) и любые tap-устройства (например,
+        от audiotee aggregate device).
+        """
         import sounddevice as sd
+
+        def _is_real_input(d: dict) -> bool:
+            name = d.get("name", "")
+            if d.get("max_input_channels", 0) <= 0:
+                return False
+            if "BlackHole" in name:
+                return False
+            if "Tap" in name or "audiotee" in name.lower():
+                return False
+            return True
+
         # Default input — sd.default.device может быть int, list, или _InputOutputPair
         try:
             default_in = int(sd.default.device[0])
@@ -497,13 +530,11 @@ class AudioCapture:
                 default_in = int(sd.default.device)
             except (TypeError, ValueError):
                 default_in = -1
-        if default_in >= 0:
-            d = devices[default_in]
-            if "BlackHole" not in d["name"] and d.get("max_input_channels", 0) > 0:
-                return default_in, min(int(d["max_input_channels"]), 2)
-        # Любой не-BlackHole input
+        if default_in >= 0 and _is_real_input(devices[default_in]):
+            return default_in, min(int(devices[default_in]["max_input_channels"]), 2)
+        # Любой подходящий input
         for i, d in enumerate(devices):
-            if d.get("max_input_channels", 0) > 0 and "BlackHole" not in d["name"]:
+            if _is_real_input(d):
                 return i, min(int(d["max_input_channels"]), 2)
         return None, 1
 
@@ -675,14 +706,19 @@ def list_audio_sources() -> list[dict]:
             pass
 
     elif config.IS_MAC:
+        # На Mac системный звук захватывается через Core Audio Tap (mac_tap.py),
+        # отдельные input-устройства больше не нужны. Список здесь — это только
+        # реальные микрофоны для возможности явного выбора. BlackHole/audiotee
+        # tap-устройства мы пропускаем как не-mic.
         try:
             import sounddevice as sd
             for i, dev in enumerate(sd.query_devices()):
-                if dev["max_input_channels"] > 0:
+                name = dev["name"]
+                if dev["max_input_channels"] > 0 and "BlackHole" not in name and "Tap" not in name:
                     sources.append({
                         "index": i,
-                        "name": dev["name"],
-                        "is_loopback": "BlackHole" in dev["name"],
+                        "name": name,
+                        "is_loopback": False,
                     })
         except Exception:
             pass

@@ -14,7 +14,7 @@
 
 Базовый пайплайн реализован и протестирован:
 
-- ✅ Захват системного аудио (WASAPI loopback на Windows, BlackHole на macOS)
+- ✅ Захват системного аудио (WASAPI loopback на Windows, Core Audio Tap на macOS 14.4+)
 - ✅ Автодетект Google Meet через Chrome расширение
 - ✅ Транскрипция:
   - Windows: **GigaAM v2_rnnt** (Sber, default) или faster-whisper (large-v3) — переключатель `TRANSCRIPTION_ENGINE`
@@ -62,16 +62,12 @@ python -m app.main
 
 ### Установка (macOS)
 
-> **Требования:** Python 3.11 (системный macOS Python — 3.9, не подходит).
-> Tkinter идёт отдельным пакетом от Homebrew.
+> **Требования:** Python 3.11 (системный macOS Python — 3.9, не подходит) + macOS 14.4+ для Core Audio Tap. Tkinter идёт отдельным пакетом от Homebrew. Для сборки `audiotee` (Swift) нужны Xcode Command Line Tools: `xcode-select --install`.
 
 ```bash
-# Установить Python 3.11 и tkinter
+# Установить Python 3.11, tkinter, Xcode CLT (если ещё нет)
 brew install python@3.11 python-tk@3.11
-
-# Предварительно: установить BlackHole (виртуальный аудиодрайвер)
-# После установки требуется перезагрузка
-brew install blackhole-2ch
+xcode-select --install  # для swift compiler (audiotee)
 
 # Создать venv и поставить зависимости
 python3.11 -m venv .venv
@@ -81,23 +77,29 @@ pip install -r requirements-mac.txt
 # Скопировать и заполнить .env
 cp .env.example .env
 # HUGGINGFACE_TOKEN=hf_...
-# CLAUDE_CLI=/Users/username/.claude/local/claude
+# CLAUDE_CLI=/Users/username/.local/bin/claude (опционально, есть автодетект)
 
 # Зарегистрировать Native Messaging хост для Chrome
 python app/extension/install_host.py
 ```
 
-### Настройка аудио (macOS)
+### Захват системного звука (macOS)
 
-После установки BlackHole настрой маршрутизацию звука:
+Используется **Core Audio Tap** (Apple API, macOS 14.4+) через бандлированный
+`audiotee` бинарь — **без BlackHole, без Multi-Output Device, без перенастройки
+системного output'а**.
 
-1. Открой **Audio MIDI Setup** (`/Applications/Utilities/`)
-2. Нажми `+` → **"Create Multi-Output Device"**
-3. Включи галочки: **BlackHole 2ch** и **MacBook Pro Speakers** (или наушники)
-4. Установи частоту **48,0 кГц**
-5. **System Settings → Sound → Output** → выбрать **Multi-Output Device**
+При первом запуске macOS покажет два диалога:
+- **"MeetDescriber хочет получить доступ к микрофону"** → Allow
+- **"MeetDescriber хочет записывать системный звук"** → Allow
 
-При первом запуске приложения macOS запросит доступ к микрофону — разрешить.
+Если разрешения не были выданы — открыть **System Settings → Privacy & Security**:
+- Microphone → MeetDescriber ✓
+- Audio Recording (или "System Audio Recording") → MeetDescriber ✓
+
+> **Старые версии macOS (< 14.4):** Core Audio Taps недоступны, используйте
+> legacy-фолбэк с BlackHole. См. `app/capture/audio_capture.py` historical
+> `_capture_blackhole`.
 
 ### Запуск (macOS)
 

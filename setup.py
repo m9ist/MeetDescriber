@@ -111,7 +111,7 @@ def check_dependencies() -> bool:
         if IS_WINDOWS:
             info("PyTorch с CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu121")
         if IS_MAC:
-            info("BlackHole: brew install blackhole-2ch")
+            info("Xcode CLT (для сборки audiotee): xcode-select --install")
 
     return all_ok
 
@@ -206,54 +206,65 @@ def check_h1_wasapi() -> bool:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# H2 — BLACKHOLE (Mac)
+# H2 — CORE AUDIO TAP (Mac)
 # ══════════════════════════════════════════════════════════════════════════
 
-def check_h2_blackhole() -> bool:
-    header("H2 — Захват системного аудио (BlackHole, Mac)")
+def check_h2_core_audio_tap() -> bool:
+    header("H2 — Захват системного аудио (Core Audio Tap, Mac)")
 
     try:
-        import sounddevice as sd
-    except ImportError:
-        fail("sounddevice не установлен — пропускаем H2")
-        record_result("H2", None)
-        return True
-
-    devices = sd.query_devices()
-    bh = next((d for d in devices if "BlackHole" in d["name"]), None)
-
-    if not bh:
-        fail("BlackHole не найден среди аудиоустройств")
-        info("Установи: brew install blackhole-2ch")
-        info("Затем настрой Aggregate Device в Audio MIDI Setup")
+        from app.capture.mac_tap import MacTapCapture, is_available, find_audiotee_binary
+    except ImportError as e:
+        fail(f"Не удалось импортировать mac_tap: {e}")
         record_result("H2", False)
         return False
 
-    ok(f"BlackHole найден: {bh['name']}")
-    info("Записываем 3 секунды (воспроизведи любой звук через BlackHole)...")
+    if not is_available():
+        fail("Core Audio Tap недоступен")
+        info("Требования: macOS 14.4+ и собранный audiotee бинарь")
+        info("Собери: bash create_mac_app.sh")
+        record_result("H2", False)
+        return False
+
+    binary = find_audiotee_binary()
+    ok(f"audiotee бинарь: {binary}")
+
+    info("Записываем 3 секунды через Core Audio Tap...")
+    info("→ Воспроизведи любой системный звук")
     ask("Нажми Enter когда будешь готов...")
 
-    rate = 44100
-    duration = 3
+    tap = MacTapCapture(sample_rate=48000, stereo=True, chunk_duration_sec=0.2)
+    collected = bytearray()
+    tap.on_frame = lambda raw: collected.extend(raw)
+    tap.on_error = lambda e: fail(f"Tap error: {e}")
+
+    import time
     try:
-        recording = sd.rec(int(duration * rate), samplerate=rate,
-                           channels=1, dtype="int16",
-                           device=bh["name"])
-        sd.wait()
+        tap.start(include_pids=None)
+        time.sleep(3)
+        tap.stop()
     except Exception as e:
-        fail(f"Ошибка записи: {e}")
+        fail(f"Ошибка захвата: {e}")
         record_result("H2", False)
         return False
 
-    flat = recording.flatten()
-    rms = (sum(int(v) ** 2 for v in flat) / len(flat)) ** 0.5
+    if not collected:
+        fail("0 байт захвачено")
+        record_result("H2", False)
+        return False
+
+    import struct
+    count = len(collected) // 2
+    samples = struct.unpack(f"<{count}h", bytes(collected))
+    rms = (sum(v * v for v in samples) / count) ** 0.5
 
     if rms < 50:
-        fail(f"Сигнал слишком тихий (RMS={rms:.0f})")
+        fail(f"Сигнал слишком тихий (RMS={rms:.0f}) — обычно permission не выдано")
+        info("System Settings → Privacy & Security → System Audio Recording → разрешить")
         record_result("H2", False)
         return False
 
-    ok(f"Звук захвачен через BlackHole (RMS={rms:.0f})")
+    ok(f"Звук захвачен через Core Audio Tap (RMS={rms:.0f})")
     record_result("H2", True)
     return True
 
@@ -596,7 +607,7 @@ def print_report() -> None:
 
     labels = {
         "H1": "Захват аудио WASAPI (Windows)",
-        "H2": "Захват аудио BlackHole (Mac)",
+        "H2": "Захват аудио Core Audio Tap (Mac)",
         "H3": "Транскрипция faster-whisper/CUDA",
         "H4": "Транскрипция mlx-whisper (Mac)",
         "H5": "Диаризация pyannote.audio",
@@ -646,7 +657,7 @@ def main() -> None:
     if IS_WINDOWS:
         check_h1_wasapi()
     elif IS_MAC:
-        check_h2_blackhole()
+        check_h2_core_audio_tap()
 
     check_h3_h4_transcription()
     check_h5_diarization()

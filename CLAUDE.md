@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Описание проекта
 Кроссплатформенное desktop-приложение (Windows + macOS, Python + tkinter) которое:
-- записывает аудио с системного loopback (WASAPI на Windows, BlackHole на Mac) во время Google Meet
+- записывает аудио с системного loopback (WASAPI на Windows, Core Audio Tap на Mac) + микрофон, во время Google Meet
 - автоматически стартует/останавливает запись через Chrome Extension (Native Messaging)
 - транскрибирует через GigaAM (Sber, native RU, default на Windows) либо faster-whisper, mlx-whisper на Mac — выбор через `TRANSCRIPTION_ENGINE`
 - диаризует через pyannote.audio 4.x (CUDA на Windows, CPU на Mac)
@@ -17,7 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Python 3.10/3.11, tkinter, pystray, Pillow
 - Windows транскрипция: **GigaAM v2_rnnt** (Sber native RU, default) либо **faster-whisper** (large-v3, CUDA). Switch через `config.TRANSCRIPTION_ENGINE`.
 - Mac транскрипция: mlx-whisper (whisper-large-v3-mlx, Apple Silicon)
-- Захват: PyAudioWPatch (Win, WASAPI loopback) / sounddevice + BlackHole (Mac); WAV-чанки по 10 сек (mic-driven)
+- Захват: PyAudioWPatch (Win, WASAPI loopback) / `vendor/audiotee` Swift-CLI поверх Core Audio Taps (Mac, macOS 14.4+) + sounddevice (mic); WAV-чанки 10 сек (mic-driven, mix-on-flush)
 - pyannote.audio 4.0.4 (CUDA на Win, CPU на Mac), SQLite (app/storage/db.py)
 - ffmpeg: через `static-ffmpeg` pip-пакет (бандлит бинарь, без admin)
 - LLM: Claude Code CLI subprocess с флагами `-p - --allowedTools Write Edit`, `cwd` = корень проекта
@@ -43,7 +43,10 @@ python -m app.main
 # Проверка всех гипотез (H1–H8): WASAPI, BlackHole, whisper, pyannote, native messaging
 python setup.py            # setup.py — это диагностический скрипт, не сборочный
 
-# Тест аудио-захвата BlackHole (macOS): запись 5 сек, RMS-проверка
+# Mac: пересборка audiotee + .app бандла (требует Xcode CLT для swift)
+bash create_mac_app.sh
+
+# Тест аудио-захвата BlackHole (legacy — больше не используется на macOS 14.4+):
 python test_blackhole.py
 ```
 
@@ -52,7 +55,7 @@ python test_blackhole.py
 app/
   main.py              # точка входа, App class, ручной event loop (Mac) или mainloop (Win)
   user_actions.py      # log_action(name, **kwargs) → app.user_action в app.log; вызывать из всех UI-обработчиков
-  capture/             # AudioCapture: WASAPI loopback (Win) / BlackHole (Mac), silence filter, drift warning
+  capture/             # AudioCapture: WASAPI loopback (Win) / Core Audio Tap (Mac, mac_tap.py), silence filter, drift warning
   diarization/         # pyannote_diarizer.py (тонкий фасад), diarize_worker.py (subprocess с pyannote + CUDA)
   extension/           # Chrome Native Messaging host + install_host.py
   processing/          # pipeline.py (оркестратор), analysis.py, followup.py
@@ -149,7 +152,7 @@ condition_on_previous_text=False, repetition_penalty=1.2, no_repeat_ngram_size=3
 - **Thread safety**: PyObjC callbacks не могут вызывать `root.after()` напрямую → используем `App._schedule(fn)`
 - **Кнопки tkinter**: на Mac Aqua-тема игнорирует `bg`/`fg`/`relief="flat"` — не указывать эти параметры
 - **Выход**: `os._exit(0)` после `tray.stop()` — `sys.exit()` и `ns_app.terminate_()` вызывают crash reporter
-- **BlackHole**: 48кГц, 2ch. Настроить Multi-Output Device в Audio MIDI Setup. Требуется разрешение на микрофон
+- **Захват системного звука (Core Audio Tap)**: используем `vendor/audiotee/` — Swift-CLI поверх Apple Core Audio Taps API (macOS 14.4+). Бинарь собирается через `create_mac_app.sh` (нужен `swift` из Xcode CLT) и бандлится в `MeetDescriber.app/Contents/Resources/audiotee`. Запускается subprocess'ом из `app/capture/mac_tap.py`. PCM в stdout (s16le, 48kHz, stereo), JSON-логи в stderr. Permission: macOS показывает диалог "System Audio Recording" при первом запуске — нужно нажать Allow. Бинарь обязан быть запущен из .app бандла с `NSAudioCaptureUsageDescription` в Info.plist, иначе TCC возвращает тишину silently. **BlackHole больше не нужен** (legacy, остаётся `test_blackhole.py` для диагностики)
 - **Native Messaging**: `.sh`-лончер создаётся динамически через `create_sh_launcher()` в `install_host.py`
 - **`root.after()` опасен**: TK на macOS регистрирует `_runBackgroundLoop` в CFRunLoop. Когда pystray открывает меню, `NSMenuTrackingSession` запускает вложенный NSApp loop, который дёргает TK background loop, который вытаскивает `after`-таймер и зовёт Python — но GIL уже отпущен → SIGABRT `_Py_FatalError_TstateNULL`. Решение: `App._schedule(fn, delay_ms=0)` — на Mac кладёт fn в `_mac_queue` (через `threading.Timer` для delay>0), main loop дренирует только когда вне NSMenu. Передаётся в `SpectrumWidget`, `ProcessingStatusWindow`, `notifications.set_schedule()`.
 - **`WM_DELETE_WINDOW` опасен**: при клике в красный «X» окна `NSControlTrackMouse → NSWindow.close → TKApplication windowShouldClose → Tk WM_DELETE_WINDOW protocol → PythonCmd` → тот же SIGABRT. Решение: `app/ui/mac_window.harden_for_mac(win)` — снимает `NSWindowStyleMaskClosable` и `NSWindowStyleMaskMiniaturizable` с NSWindow. Применяется ко всем Toplevel: `ClaudeManualDialog`, `MeetingsWindow`, `ProcessingStatusWindow`. Закрытие — только через in-app кнопки или ESC.

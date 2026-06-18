@@ -15,3 +15,7 @@ data/meets.db
 *.log
 .claude/
 MeetDescriber.app/
+vendor/audiotee/.build/
+vendor/audiotee/Package.resolved
+.DS_Store
+research/audiotee_test/

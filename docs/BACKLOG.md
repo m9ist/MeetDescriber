@@ -59,6 +59,18 @@
 Актуально при записи чужого видео/совещания фоном.
 Реализация: WASAPI loopback + mute системного устройства вывода или отдельный silent sink.
 
+**B16 — Выбор приложений для захвата системного звука (macOS)**
+Сейчас Core Audio Tap (`mac_tap.py` → audiotee) тапает все процессы. Это
+значит в запись попадает фоновая музыка из Spotify, нотификации Slack/Discord
+и т.п. Хотим тапать только релевантные процессы:
+- Автоматически: PID(ы) Chrome (через Native Messaging — получаем `tabs.processId`),
+  плюс Meet-related процессы (audio.googleapis.com, etc.).
+- Опционально вручную: чекбоксы в настройках "Что писать" (Chrome, Slack, Zoom...).
+audiotee уже умеет `--include-processes <pids...>` / `--exclude-processes`.
+Нужно прокинуть PIDs из `app/main.py._handle_meet_started` через `AudioCapture.start()`
+до `MacTapCapture.start(include_pids=...)`. Бонус: можно не писать в запись
+фоновую музыку даже если пользователь её включил.
+
 ---
 
 ## Обработка / Надёжность
@@ -107,3 +119,11 @@ Standalone-CLI для разовой транскрипции одного фа�
 
 **Issues #20, #21** ✅
 Убрана тост-табличка «Плохо слышно» (#20). Полировка `MeetingStartDialog` (#21): автофокус, убран селектор источника, починен copy-paste на русской раскладке.
+
+**Захват системного звука на macOS без BlackHole** ✅
+Перешли с BlackHole virtual driver на Core Audio Taps (macOS 14.4+). Бандлим
+Swift-CLI `audiotee` (MIT, `vendor/audiotee/`) внутрь MeetDescriber.app, запускаем
+subprocess'ом из `app/capture/mac_tap.py`. Пользователь больше не настраивает
+Multi-Output Device — macOS показывает один permission-prompt "System Audio
+Recording" при первом запуске. Микрофон по-прежнему через sounddevice, микс
+при flush. См. также B16 — выбор PIDs для тапа.
