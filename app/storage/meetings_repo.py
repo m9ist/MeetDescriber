@@ -6,13 +6,17 @@
 """
 from __future__ import annotations
 
+import logging
 import shutil
+import wave
 from pathlib import Path
 from typing import Literal
 
 import config
 from app.storage.db import get_conn
 from app.storage.file_manager import get_doc_paths
+
+log = logging.getLogger(__name__)
 
 
 # ── Чтение ────────────────────────────────────────────────────────────────────
@@ -277,6 +281,138 @@ def reset_to_stage(
             f"error=NULL, updated_at=datetime('now') WHERE id=?",
             (new_status, job_id),
         )
+
+
+# ── Объединение совещаний ───────────────────────────────────────────────────
+
+def _delete_session_docs(session_id: int, conn) -> None:
+    """Удаляет все документы сессии (по путям из БД и по вычисленным именам)."""
+    session = conn.execute(
+        "SELECT title, started_at FROM sessions WHERE id=?", (session_id,)
+    ).fetchone()
+    job = conn.execute(
+        "SELECT transcription_path, analysis_path, followup_path FROM jobs WHERE session_id=?",
+        (session_id,),
+    ).fetchone()
+    if session:
+        doc_paths = get_doc_paths(session["title"] or "", session["started_at"] or "")
+        for key in ("transcription", "analysis", "analysis_prompt", "followup", "followup_prompt"):
+            _unlink(doc_paths.get(key))
+    if job:
+        for col in ("transcription_path", "analysis_path", "followup_path"):
+            if job[col]:
+                _unlink(Path(job[col]))
+
+
+def merge_meetings(session_id_1: int, session_id_2: int) -> int:
+    """
+    Объединяет два совещания в одно. База — то, что началось РАНЬШЕ.
+
+    - аудиочанки позднего совещания дописываются к базовому (нумерация продолжается)
+    - результаты транскрипции/анализа/follow-up ОБОИХ совещаний удаляются
+    - merged.wav и diarization.json базового удаляются (устарели)
+    - job базового сбрасывается в pending
+    - позднее совещание удаляется из БД целиком, его (опустевшая) папка — тоже
+    - ended_at базового продлевается до ended_at позднего
+
+    Возвращает session_id базового (раннего) совещания — его параметры
+    (название/агенду) затем редактирует пользователь.
+    """
+    if session_id_1 == session_id_2:
+        raise ValueError("Нельзя объединить совещание с самим собой")
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, started_at, ended_at FROM sessions WHERE id IN (?,?)",
+            (session_id_1, session_id_2),
+        ).fetchall()
+        if len(rows) != 2:
+            raise ValueError("Одно из совещаний не найдено")
+
+        by_id = {r["id"]: dict(r) for r in rows}
+        # База — раннее по started_at (пустой started_at считаем «очень поздним»)
+        base_id, other_id = sorted(
+            (session_id_1, session_id_2),
+            key=lambda sid: by_id[sid]["started_at"] or "9999",
+        )
+        base = by_id[base_id]
+        other = by_id[other_id]
+
+    base_dir = config.RECORDINGS_DIR / f"session_{base_id}"
+    other_dir = config.RECORDINGS_DIR / f"session_{other_id}"
+
+    # ── Переносим чанки позднего в базовый, продолжая нумерацию ──────────────
+    base_chunks = sorted(base_dir.glob("chunk_*.wav"))
+    other_chunks = sorted(other_dir.glob("chunk_*.wav"))
+
+    if not other_chunks:
+        raise ValueError("У позднего совещания нет аудиозаписей для объединения")
+
+    # Сверяем WAV-параметры — иначе склейка даст рассинхрон/мусор
+    if base_chunks:
+        with wave.open(str(base_chunks[0]), "rb") as wf:
+            base_params = wf.getparams()[:3]  # nchannels, sampwidth, framerate
+        with wave.open(str(other_chunks[0]), "rb") as wf:
+            other_params = wf.getparams()[:3]
+        if base_params != other_params:
+            log.warning(
+                "merge: WAV params differ base=%s other=%s — склейка может рассинхрониться",
+                base_params, other_params,
+            )
+
+    next_idx = (
+        int(base_chunks[-1].stem.split("_")[1]) + 1 if base_chunks else 0
+    )
+    base_dir.mkdir(parents=True, exist_ok=True)
+    for chunk in other_chunks:
+        dest = base_dir / f"chunk_{next_idx:04d}.wav"
+        shutil.move(str(chunk), str(dest))
+        next_idx += 1
+    log.info("merge: moved %d chunks from session %d into session %d",
+             len(other_chunks), other_id, base_id)
+
+    # Устаревшие артефакты базового — пересоберутся при перезапуске
+    _unlink(base_dir / "merged.wav")
+    _unlink(base_dir / "diarization.json")
+
+    # ── Удаляем документы и БД-строки, сбрасываем job базового ──────────────
+    with get_conn() as conn:
+        _delete_session_docs(base_id, conn)
+        _delete_session_docs(other_id, conn)
+
+        # ended_at базового продлеваем до позднего
+        new_ended = other["ended_at"] or base["ended_at"]
+        if new_ended:
+            conn.execute("UPDATE sessions SET ended_at=? WHERE id=?", (new_ended, base_id))
+
+        # job базового → pending, все пути/длительности очищаем
+        base_job = conn.execute(
+            "SELECT id FROM jobs WHERE session_id=?", (base_id,)
+        ).fetchone()
+        if base_job:
+            conn.execute(
+                "UPDATE jobs SET status='pending', dismissed=0, error=NULL, "
+                "transcription_path=NULL, analysis_path=NULL, followup_path=NULL, "
+                "transcribe_duration_sec=NULL, diarize_duration_sec=NULL, "
+                "analyze_duration_sec=NULL, followup_duration_sec=NULL, "
+                "updated_at=datetime('now') WHERE id=?",
+                (base_job["id"],),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO jobs (session_id, status) VALUES (?, 'pending')",
+                (base_id,),
+            )
+
+        # Позднее совещание удаляем целиком
+        conn.execute("DELETE FROM speakers WHERE session_id=?", (other_id,))
+        conn.execute("DELETE FROM jobs WHERE session_id=?", (other_id,))
+        conn.execute("DELETE FROM sessions WHERE id=?", (other_id,))
+
+    _rmdir(other_dir)  # уже пустая (чанки перенесены)
+    log.info("merge: session %d merged into %d, session %d deleted",
+             other_id, base_id, other_id)
+    return base_id
 
 
 # ── Скрытие ───────────────────────────────────────────────────────────────────

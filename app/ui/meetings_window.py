@@ -317,6 +317,12 @@ class MeetingsWindow:
             command=lambda: self._restart_stage(job_id, "followup"),
         )
         menu.add_separator()
+        menu.add_command(
+            label="Объединить с другим совещанием…",
+            state="normal" if has_audio else "disabled",
+            command=lambda: self._merge_meeting(session_id, meeting),
+        )
+        menu.add_separator()
         can_delete_audio = has_audio and status in ("transcribed", "analyzed", "done")
         menu.add_command(
             label="Удалить аудио",
@@ -434,6 +440,121 @@ class MeetingsWindow:
             return
         self._reload_meetings()
         self._notify_data_changed()
+
+    def _merge_meeting(self, session_id: int, meeting: dict) -> None:
+        """Объединяет это совещание с выбранным из списка.
+
+        База — то, что началось раньше; результаты транскрипции обоих
+        удаляются, аудио склеивается, затем пользователь правит параметры.
+        """
+        log_action("meetings_merge_click", session_id=session_id)
+
+        # Кандидаты — все остальные совещания, у которых есть аудио
+        candidates = []
+        for m in self._meetings:
+            sid = m.get("session_id")
+            if sid == session_id:
+                continue
+            adir = config.RECORDINGS_DIR / f"session_{sid}"
+            if adir.exists() and any(adir.iterdir()):
+                candidates.append(m)
+
+        if not candidates:
+            messagebox.showinfo(
+                "Объединение",
+                "Нет других совещаний с аудио для объединения.",
+                parent=self._win,
+            )
+            return
+
+        other_id = self._pick_meeting_dialog(meeting, candidates)
+        if other_id is None:
+            log_action("meetings_merge_cancel", session_id=session_id)
+            return
+
+        if not messagebox.askyesno(
+            "Объединить совещания",
+            "Аудио будет склеено в одно совещание (то, что началось раньше).\n"
+            "Транскрипция, анализ и follow-up ОБОИХ совещаний будут удалены — "
+            "потребуется перезапустить обработку.\n\nПродолжить?",
+            parent=self._win,
+        ):
+            log_action("meetings_merge_cancel", session_id=session_id)
+            return
+
+        log_action("meetings_merge_confirm", session_id=session_id, other_id=other_id)
+        try:
+            base_id = meetings_repo.merge_meetings(session_id, other_id)
+        except Exception as e:
+            messagebox.showerror("Ошибка", str(e), parent=self._win)
+            return
+
+        self._reload_meetings()
+        self._notify_data_changed()
+
+        # Даём пользователю заполнить параметры объединённого совещания (база — раннее)
+        base = self._find_meeting(base_id) or {}
+        self._edit_meeting(base_id, base)
+
+    def _pick_meeting_dialog(
+        self, current: dict, candidates: list[dict]
+    ) -> Optional[int]:
+        """Модальный диалог выбора второго совещания. Возвращает session_id или None."""
+        dlg = tk.Toplevel(self._win)
+        dlg.title("С каким совещанием объединить?")
+        dlg.transient(self._win)
+        dlg.resizable(False, False)
+
+        cur_title = current.get("title") or "Без названия"
+        cur_date = _fmt_date(current.get("started_at"))
+        tk.Label(
+            dlg,
+            text=f"Объединить с:\n«{cur_title}»  ({cur_date})",
+            anchor="w", justify="left",
+        ).pack(fill="x", padx=12, pady=(12, 6))
+
+        frame = tk.Frame(dlg)
+        frame.pack(fill="both", expand=True, padx=12)
+        listbox = tk.Listbox(frame, height=10, width=60, activestyle="dotbox")
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=listbox.yview)
+        listbox.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        listbox.pack(side="left", fill="both", expand=True)
+
+        for m in candidates:
+            date = _fmt_date(m.get("started_at"))
+            title = m.get("title") or "Без названия"
+            listbox.insert("end", f"{date}   {title}")
+        listbox.selection_set(0)
+
+        result: dict = {"id": None}
+
+        def confirm():
+            sel = listbox.curselection()
+            if sel:
+                result["id"] = candidates[sel[0]].get("session_id")
+            dlg.destroy()
+
+        def cancel():
+            dlg.destroy()
+
+        listbox.bind("<Double-Button-1>", lambda e: confirm())
+
+        btns = tk.Frame(dlg)
+        btns.pack(fill="x", padx=12, pady=12)
+        _btn_kw = {"padx": 10, "pady": 4} if config.IS_WINDOWS else {"padx": 10}
+        tk.Button(btns, text="Объединить", command=confirm, **_btn_kw).pack(side="right", padx=(6, 0))
+        tk.Button(btns, text="Отмена", command=cancel, **_btn_kw).pack(side="right")
+
+        dlg.update_idletasks()
+        # Центрируем относительно главного окна
+        x = self._win.winfo_rootx() + (self._win.winfo_width() - dlg.winfo_width()) // 2
+        y = self._win.winfo_rooty() + (self._win.winfo_height() - dlg.winfo_height()) // 2
+        dlg.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+
+        dlg.grab_set()
+        self._win.wait_window(dlg)
+        return result["id"]
 
     # ── Кнопка удаления старого аудио ────────────────────────────────────────
 
