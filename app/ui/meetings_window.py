@@ -456,7 +456,9 @@ class MeetingsWindow:
             if sid == session_id:
                 continue
             adir = config.RECORDINGS_DIR / f"session_{sid}"
-            if adir.exists() and any(adir.iterdir()):
+            # Именно chunk-файлы, а не «папка непуста»: сессия только с
+            # merged.wav/diarization.json как «поздняя» упадёт в merge_meetings.
+            if adir.exists() and any(adir.glob("chunk_*.wav")):
                 candidates.append(m)
 
         if not candidates:
@@ -551,6 +553,14 @@ class MeetingsWindow:
         x = self._win.winfo_rootx() + (self._win.winfo_width() - dlg.winfo_width()) // 2
         y = self._win.winfo_rooty() + (self._win.winfo_height() - dlg.winfo_height()) // 2
         dlg.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+
+        # На Mac WM_DELETE_WINDOW зовётся из NSControlTrackMouse → SIGABRT.
+        if config.IS_MAC:
+            from app.ui.mac_window import harden_for_mac
+            harden_for_mac(dlg)
+            dlg.bind("<Escape>", lambda e: cancel())
+        else:
+            dlg.protocol("WM_DELETE_WINDOW", cancel)
 
         dlg.grab_set()
         self._win.wait_window(dlg)

@@ -484,6 +484,12 @@ class MeetingEditDialog:
         h = win.winfo_height()
         win.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
 
+        # На Mac WM_DELETE_WINDOW (клик по X) → SIGABRT. Прячем кнопку закрытия,
+        # закрытие — кнопками «Сохранить»/«Отмена» или Escape.
+        harden_for_mac(win)
+        if config.IS_MAC:
+            win.bind("<Escape>", lambda e: win.destroy())
+
         title_entry.focus_force()
         if title:
             title_entry.select_range(0, "end")

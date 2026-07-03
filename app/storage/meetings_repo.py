@@ -355,14 +355,23 @@ def merge_meetings(session_id_1: int, session_id_2: int) -> int:
         with wave.open(str(other_chunks[0]), "rb") as wf:
             other_params = wf.getparams()[:3]
         if base_params != other_params:
-            log.warning(
-                "merge: WAV params differ base=%s other=%s — склейка может рассинхрониться",
-                base_params, other_params,
+            # merge_chunks пишет все фреймы параметрами chunks[0] — при расхождении
+            # nchannels/sampwidth/framerate получится рассинхрон/мусор. Отказываемся
+            # ДО любых мутаций ФС (ничего ещё не перенесено).
+            raise ValueError(
+                f"Параметры аудио различаются (base={base_params} other={other_params}) — "
+                "объединение невозможно без пересэмплирования"
             )
 
-    next_idx = (
-        int(base_chunks[-1].stem.split("_")[1]) + 1 if base_chunks else 0
-    )
+    def _chunk_idx(p: Path) -> int:
+        """Номер чанка из имени chunk_NNNN; -1 если имя не числовое."""
+        try:
+            return int(p.stem.split("_", 1)[1])
+        except (ValueError, IndexError):
+            return -1
+
+    base_nums = [n for n in (_chunk_idx(p) for p in base_chunks) if n >= 0]
+    next_idx = (max(base_nums) + 1) if base_nums else 0
     base_dir.mkdir(parents=True, exist_ok=True)
     for chunk in other_chunks:
         dest = base_dir / f"chunk_{next_idx:04d}.wav"
