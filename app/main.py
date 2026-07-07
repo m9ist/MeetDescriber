@@ -20,6 +20,7 @@ import faulthandler
 import json
 import logging
 import queue
+import re
 import shutil
 import threading
 import tkinter as tk
@@ -248,16 +249,19 @@ class App:
 
     @staticmethod
     def _clean_meet_title(title: str) -> str:
-        """Убирает служебный префикс из заголовка Meet-вкладки.
+        """Убирает служебный префикс «Meet» из заголовка вкладки.
 
         "Meet – Weekly Sync" → "Weekly Sync", "Meet – abc-defg-hij" → "abc-defg-hij".
+
+        ВАЖНО: Google Meet разделяет префикс НЕРАЗРЫВНЫМ пробелом (U+00A0),
+        а не обычным: заголовок = "Meet\\u00a0– Название". Плюс тире может быть
+        любым (– — -). Поэтому матчим регэкспом по классу пробелов+тире, а не
+        по фиксированной строке.
         """
         t = (title or "").strip()
-        for prefix in ("Meet – ", "Meet — ", "Meet - "):
-            if t.startswith(prefix):
-                t = t[len(prefix):].strip()
-                break
-        return t
+        # ^Meet, затем любые пробелы (вкл. NBSP U+00A0), тире (–/—/-), снова пробелы
+        t = re.sub(r"^Meet[\s ]*[–—-][\s ]*", "", t)
+        return t.strip()
 
     def _handle_meet_started(self, msg: dict) -> None:
         tab_id = msg.get("tab_id")
