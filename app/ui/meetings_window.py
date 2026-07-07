@@ -353,22 +353,35 @@ class MeetingsWindow:
 
     def _edit_meeting(self, session_id: int, meeting: dict) -> None:
         from app.ui.dialogs import ask_edit_meeting_info
+        from app.storage.file_manager import rename_session_docs
+        from app.storage.db import update_job_paths
 
         log_action("meetings_edit_meeting", session_id=session_id,
                    title=meeting.get("title"))
+        old_title = meeting.get("title") or ""
+        old_agenda = meeting.get("agenda") or ""
+        started_at = meeting.get("started_at") or ""
+
         result = ask_edit_meeting_info(
-            self._win,
-            title=meeting.get("title") or "",
-            agenda=meeting.get("agenda") or "",
+            self._win, title=old_title, agenda=old_agenda,
         )
         if result is None:
             log_action("meetings_edit_meeting_cancel", session_id=session_id)
             return
+
+        new_title = result["title"]
+        new_agenda = result["agenda"]
         try:
+            # Имена документов выводятся из названия — при смене названия
+            # файлы на диске надо переименовать и обновить пути в jobs,
+            # иначе на диске останется старое имя (как в трей-редактировании).
+            if new_title and new_title != old_title:
+                new_paths = rename_session_docs(session_id, old_title, new_title, started_at)
+                update_job_paths(session_id, new_paths)
             with get_conn() as conn:
                 conn.execute(
                     "UPDATE sessions SET title=?, agenda=? WHERE id=?",
-                    (result["title"], result["agenda"], session_id),
+                    (new_title or old_title, new_agenda, session_id),
                 )
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось сохранить:\n{e}", parent=self._win)
