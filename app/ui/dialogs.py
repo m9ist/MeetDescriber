@@ -348,9 +348,19 @@ class ClaudeManualDialog:
                     self._queue.put(self.STAGE_DONE)
                     _safe_after(self._win, 0, self._win.destroy)
                 else:
-                    err = r.stderr.decode("utf-8", errors="replace")[:200]
-                    log.error("claude failed [%s] rc=%d stderr: %s", self._stage, r.returncode, err)
-                    _safe_after(self._win, 0, lambda: self._run_failed(f"rc={r.returncode}: {err}"))
+                    # claude -p кладёт текст ошибки в STDOUT, а не stderr —
+                    # логируем оба и показываем пользователю осмысленную причину.
+                    out = r.stdout.decode("utf-8", errors="replace").strip()
+                    err = r.stderr.decode("utf-8", errors="replace").strip()
+                    log.error("claude failed [%s] rc=%d\nstdout: %s\nstderr: %s",
+                              self._stage, r.returncode, out[:500], err[:500])
+                    detail = out or err or f"rc={r.returncode}"
+                    if "authenticate" in detail.lower() or "oauth" in detail.lower():
+                        msg = ("Claude CLI не авторизован (сессия истекла).\n"
+                               "Выполни вход: claude → /login, затем повтори.")
+                    else:
+                        msg = detail[:200]
+                    _safe_after(self._win, 0, lambda: self._run_failed(msg))
             except Exception as e:
                 log.error("claude worker exception [%s]: %s", self._stage, e, exc_info=True)
                 _safe_after(self._win, 0, lambda: self._run_failed(str(e)))
