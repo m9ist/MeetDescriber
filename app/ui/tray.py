@@ -13,6 +13,7 @@
   - Выход
 """
 import ctypes
+import logging
 import os
 import subprocess
 import threading
@@ -24,6 +25,8 @@ from PIL import Image, ImageDraw
 
 import config
 from app.ui.user_actions import log_action
+
+log = logging.getLogger(__name__)
 
 # Custom Win32 message: posted from any thread to trigger refresh on pystray thread.
 # WM_USER = 0x0400; +100 keeps us far from any pystray internals.
@@ -104,6 +107,7 @@ class ForMeetsTray:
 
         self._icon: Optional[pystray.Icon] = None
         self._icon_hwnd: Optional[int] = None  # Win32 HWND; set after pystray is running
+        self._thread: Optional[threading.Thread] = None
 
     # ── Публичные методы (потокобезопасны) ───────────────────────────────────
 
@@ -119,7 +123,30 @@ class ForMeetsTray:
 
     def start(self) -> None:
         """Запускает трей в отдельном потоке (Windows)."""
-        threading.Thread(target=self._run, daemon=True, name="tray").start()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="tray")
+        self._thread.start()
+
+    def is_alive(self) -> bool:
+        """False только если поток трея был запущен и умер.
+
+        pystray выходит из своего message loop по break без единой записи в лог,
+        а в finally снимает иконку: процесс продолжает жить, но иконки нет —
+        снаружи это неотличимо от падения приложения.
+        """
+        if self._thread is None:
+            return True  # Mac: run_detached, своего потока не держим
+        return self._thread.is_alive()
+
+    def restart(self) -> None:
+        """Пересоздаёт иконку после смерти потока трея (Windows).
+
+        Состояние (статус, списки заданий) живёт в полях этого объекта, поэтому
+        новая иконка поднимается с тем же меню.
+        """
+        log.critical("tray thread died — recreating icon")
+        self._icon = None
+        self._icon_hwnd = None
+        self.start()
 
     def start_for_mac(self) -> None:
         """macOS: создаёт Icon и вызывает run_detached().

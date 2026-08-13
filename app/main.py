@@ -15,10 +15,12 @@
   Tray → "Начать запись" → диалог → AudioCapture.start()
 """
 import sys
+import atexit
 import io
 import faulthandler
 import json
 import logging
+import os
 import queue
 import re
 import shutil
@@ -36,6 +38,19 @@ if sys.platform == "win32":
 import config
 
 _LOG_PATH = config.ROOT_DIR / "app.log"
+_LOG_MAX_BYTES = 20 * 1024 * 1024
+
+# Ротация именно при старте, а не по размеру во время работы: в app.log пишут ДВА
+# держателя файла — logging и faulthandler (ниже), а на Windows переименовать файл
+# с открытым хендлом нельзя, RotatingFileHandler на этом молча ломается. Здесь же
+# ни один хендл ещё не открыт.
+if _LOG_PATH.exists() and _LOG_PATH.stat().st_size > _LOG_MAX_BYTES:
+    _prev = _LOG_PATH.with_suffix(".log.1")
+    try:
+        _prev.unlink(missing_ok=True)
+        _LOG_PATH.rename(_prev)
+    except OSError:
+        pass  # файл занят другим инстансом — пишем дальше в тот же
 
 # faulthandler пишет напрямую через OS write() — работает даже при SIGABRT.
 # Направляем в app.log чтобы трейсбек был там, а не только в терминале.
@@ -65,6 +80,65 @@ log.info("=== app start ===")
 for _noisy in ("numba", "httpcore", "httpx", "urllib3"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)  # первая запись сразу при старте
 
+
+# ── Наблюдаемость выхода ──────────────────────────────────────────────────────
+# Приложение умело исчезать, не оставив ни строчки: парного лога к "app start" не
+# было, stderr выбрасывается лончером (start_windows.vbs, скрытое окно), а
+# faulthandler ловит только fault'ы (SIGSEGV/SIGABRT) — но не штатный выход, не
+# CTRL-события Windows и не TerminateProcess. Ниже — минимум, после которого
+# каждый вариант смерти оставляет след.
+# На Mac выход идёт через os._exit(0) (сознательно, иначе crash reporter), поэтому
+# ни atexit, ни finally в main() там не срабатывают — всё это про Windows.
+
+atexit.register(lambda: log.warning("=== app exit (atexit) pid=%s ===", os.getpid()))
+
+
+def _thread_excepthook(args) -> None:
+    """Необработанное исключение в фоновом потоке.
+
+    По умолчанию Python пишет его в stderr, который у нас уходит в никуда, и поток
+    умирает молча. Так, например, теряется смерть потока pystray: иконка исчезает,
+    процесс жив, а снаружи это выглядит как падение приложения.
+    """
+    log.critical(
+        "Unhandled exception in thread %s:\n%s",
+        args.thread.name if args.thread else "?",
+        "".join(traceback.format_exception(
+            args.exc_type, args.exc_value, args.exc_traceback)),
+    )
+
+
+threading.excepthook = _thread_excepthook
+
+if sys.platform == "win32":
+    # Процесс консольный (python.exe со скрытым окном), поэтому при logoff,
+    # shutdown или закрытии консоли Windows шлёт CTRL_*-событие и гасит его
+    # штатно — ни fault'а, ни отчёта WER. Пишем прямо в файл дампа, минуя
+    # logging: на этом этапе handler'ы уже могут не отработать.
+    import ctypes as _ctypes
+    from ctypes import wintypes as _wintypes
+
+    _CTRL_EVENT_NAMES = {0: "CTRL_C", 1: "CTRL_BREAK", 2: "CTRL_CLOSE",
+                         5: "CTRL_LOGOFF", 6: "CTRL_SHUTDOWN"}
+
+    def _on_console_ctrl(event_type: int) -> bool:
+        try:
+            _fault_log.write(
+                f"\n=== ConsoleCtrlEvent "
+                f"{_CTRL_EVENT_NAMES.get(event_type, event_type)} "
+                f"pid={os.getpid()} ===\n"
+            )
+            _fault_log.flush()
+        except Exception:
+            pass
+        return False  # дефолтную обработку не подавляем
+
+    # Ссылку держим в модуле: иначе GC соберёт обёртку, и Windows вызовет
+    # освобождённую память.
+    _CONSOLE_CTRL_HANDLER = _ctypes.WINFUNCTYPE(
+        _wintypes.BOOL, _wintypes.DWORD)(_on_console_ctrl)
+    _ctypes.windll.kernel32.SetConsoleCtrlHandler(_CONSOLE_CTRL_HANDLER, True)
+
 from app.storage.db import init_db, get_conn, update_session, update_job_paths
 from app.storage.file_manager import rename_session_docs
 from app.capture.audio_capture import AudioCapture
@@ -72,6 +146,11 @@ from app.extension.native_host import BRIDGE_HOST, BRIDGE_PORT
 from app.ui import notifications, tray as tray_module, dialogs
 from app.ui.spectrum import SpectrumWidget
 from app.ui.status_window import ProcessingStatusWindow
+
+
+# Интервал heartbeat'а: раз в 5 минут — достаточно, чтобы датировать смерть
+# приложения, и не заваливает лог (288 строк в сутки).
+HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000
 
 
 class App:
@@ -88,6 +167,7 @@ class App:
         # Все tkinter-операции передаём через эту очередь и выполняем в main loop.
         self._mac_queue: queue.SimpleQueue = queue.SimpleQueue()
         self._running: bool = True  # флаг выхода для ручного event loop на Mac
+        self._bridge_thread: Optional[threading.Thread] = None
 
         # Tkinter root — главный поток
         self._root = tk.Tk()
@@ -126,13 +206,15 @@ class App:
     # ── Запуск ────────────────────────────────────────────────────────────────
 
     def run(self) -> None:
-        threading.Thread(
+        self._bridge_thread = threading.Thread(
             target=self._run_bridge_server,
             daemon=True,
             name="ext-bridge",
-        ).start()
+        )
+        self._bridge_thread.start()
 
         self._refresh_tray_jobs()
+        self._schedule(self._heartbeat, HEARTBEAT_INTERVAL_MS)
 
         if config.IS_MAC:
             # macOS: ручной event loop — единственный безопасный способ совместить
@@ -344,6 +426,29 @@ class App:
     def _on_stop_manual(self) -> None:
         log.info("_on_stop_manual called")
         self._schedule(self._stop_and_offer_processing)
+
+    def _heartbeat(self) -> None:
+        """Отметка «главный поток жив» + проверка фоновых потоков.
+
+        В простое приложение не писало в лог ничего, поэтому по логу нельзя было
+        отличить «умерло сразу после встречи» от «умерло ночью», а смерть потока
+        pystray (иконка исчезла при живом процессе) выглядела как падение.
+        Одна строка раз в HEARTBEAT_INTERVAL_MS различает эти случаи.
+        """
+        try:
+            tray_alive = self._tray.is_alive()
+            log.info(
+                "heartbeat  recording=%s  tray_thread=%s  bridge_thread=%s",
+                bool(self._capture and self._capture.is_recording),
+                "alive" if tray_alive else "DEAD",
+                "alive" if (self._bridge_thread and self._bridge_thread.is_alive())
+                else "DEAD",
+            )
+            if not tray_alive:
+                self._tray.restart()
+        except Exception:
+            log.error("heartbeat error", exc_info=True)
+        self._schedule(self._heartbeat, HEARTBEAT_INTERVAL_MS)
 
     def _schedule(self, fn, delay_ms: int = 0) -> None:
         """Thread-safe планировщик для tkinter-операций с опциональной задержкой.
@@ -719,11 +824,23 @@ class App:
 
 
 def main() -> None:
+    # SystemExit и KeyboardInterrupt — это BaseException: до этой правки они
+    # проходили мимо except Exception и гасили процесс без единой записи.
     try:
         App().run()
+    except SystemExit as exc:
+        log.critical("exit via SystemExit code=%s", exc.code)
+        raise
+    except KeyboardInterrupt:
+        log.critical("exit via KeyboardInterrupt")
+        raise
     except Exception:
         log.critical("Unhandled exception:\n%s", traceback.format_exc())
         raise
+    finally:
+        # Штатный возврат mainloop() (например root.quit()) раньше не оставлял
+        # следа — процесс просто исчезал с кодом 0.
+        log.warning("=== run() returned, main() exiting ===")
 
 
 if __name__ == "__main__":
