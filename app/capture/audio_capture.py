@@ -34,6 +34,11 @@ OnError = Callable[[Exception], None]
 DRIFT_WARN_THRESHOLD_SEC = 5.0
 DRIFT_WARN_COOLDOWN_SEC = 60.0   # throttling, чтобы не спамить
 
+# Сколько ждать выхода lb-reader'а из loopback_stream.read() перед закрытием стрима.
+# PortAudio блокирует read() пока в системе тишина, поэтому ждать приходится не
+# «мгновение», а до нескольких секунд.
+LB_READER_JOIN_TIMEOUT_SEC = 5.0
+
 
 class AudioCapture:
     """
@@ -95,15 +100,22 @@ class AudioCapture:
     def stop(self) -> None:
         """Останавливает захват. Блокирует до завершения потока."""
         self._recording = False
-        for stream in (self._loopback_stream, self._mic_stream):
-            if stream is not None:
-                try:
-                    stream.stop_stream()
-                except Exception:
-                    pass
+        # Только микрофон: его read() держит основной цикл захвата, и его надо
+        # разблокировать. Loopback-стрим отсюда НЕ трогаем — его читает поток
+        # lb-reader, и stop_stream() под работающим read() даёт access violation
+        # (дамп 11.06 в app.log). Loopback закрывает сам поток захвата, дождавшись
+        # выхода reader'а из read().
+        if self._mic_stream is not None:
+            try:
+                self._mic_stream.stop_stream()
+            except Exception:
+                pass
         if self._thread:
             self._thread.join(timeout=10)
             self._thread = None
+        # Пул оценки качества создаётся на каждую сессию и живёт не-демон
+        # потоками до конца процесса, если его не закрыть.
+        self._executor.shutdown(wait=False)
 
     @property
     def is_recording(self) -> bool:
@@ -130,6 +142,9 @@ class AudioCapture:
         log = logging.getLogger(__name__)
         log.setLevel(logging.DEBUG)
         pa = pyaudio.PyAudio()
+        lb_thread: Optional[threading.Thread] = None
+        loopback_stream = None
+        mic_stream = None
         try:
             device = self._find_wasapi_loopback(pa, device_index)
             self._rate = int(device["defaultSampleRate"])
@@ -176,7 +191,8 @@ class AudioCapture:
                     except OSError:
                         break
 
-            threading.Thread(target=_lb_reader, daemon=True, name="lb-reader").start()
+            lb_thread = threading.Thread(target=_lb_reader, daemon=True, name="lb-reader")
+            lb_thread.start()
 
             # Microphone
             mic_stream = None
@@ -309,17 +325,39 @@ class AudioCapture:
             if frames_buffered > 0:
                 _flush_chunk()
 
+        finally:
+            # Разрушение — единственным путём, в том числе при выходе по исключению
+            # (раньше исключение в цикле оставляло стримы открытыми).
+            # Флаг снимаем первым: иначе lb-reader крутится вечно, а is_recording
+            # остаётся True и следующая запись не стартует.
+            self._recording = False
             self._loopback_stream = None
             self._mic_stream = None
-            for s in (loopback_stream, mic_stream):
+
+            # lb-reader может стоять внутри loopback_stream.read(): PortAudio
+            # блокирует чтение, пока в системе тишина. Закрыть стрим или
+            # терминировать PortAudio под работающим read() — это access violation,
+            # которая убивает процесс без шанса на traceback (дамп 11.06 в app.log).
+            # Поэтому сначала ждём выхода reader'а, а если он застрял — намеренно
+            # оставляем loopback открытым: утечка стрима на одну сессию дешевле
+            # убитого приложения.
+            if lb_thread is not None:
+                lb_thread.join(timeout=LB_READER_JOIN_TIMEOUT_SEC)
+            lb_stuck = lb_thread is not None and lb_thread.is_alive()
+            if lb_stuck:
+                log.error("lb-reader не вышел из read() за %.0f с — не закрываем "
+                          "loopback-стрим и не терминируем PortAudio",
+                          LB_READER_JOIN_TIMEOUT_SEC)
+
+            for s in (mic_stream, None if lb_stuck else loopback_stream):
                 if s is not None:
                     try:
                         s.stop_stream()
                         s.close()
                     except Exception:
                         pass
-        finally:
-            pa.terminate()
+            if not lb_stuck:
+                pa.terminate()
 
     def _find_default_mic(self, pa) -> Optional[dict]:
         import pyaudiowpatch as pyaudio
