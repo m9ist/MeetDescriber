@@ -114,6 +114,22 @@ Standalone-CLI для разовой транскрипции одного фа�
 **Alert drift mic↔loopback** ✅
 В `_flush_chunk` мониторим расхождение mic-stream и loopback. При >5 сек — toast «⚠ Микрофон лагает» (другое приложение держит mic exclusive или USB-throttling).
 
+**Наблюдаемость смерти приложения** ✅
+Приложение иногда исчезало в простое, не оставив следов: faulthandler ловит только
+fault'ы, WER молчит, парного лога к `=== app start ===` не было, stderr выбрасывался
+лончером. Добавлены `atexit`, `finally` в `main()`, ветки `SystemExit`/`KeyboardInterrupt`,
+`threading.excepthook` → лог, `SetConsoleCtrlHandler` (logoff/shutdown), heartbeat раз
+в 5 минут с состоянием потоков трея и моста, `ForMeetsTray.is_alive()/restart()` для
+случая «умер поток pystray, иконка исчезла, процесс жив», ротация `app.log` при старте
+и stderr лончера в `app.err.log`. Таблица «как читать лог» — в `CLAUDE.md`.
+
+**Гонка разрушения аудио-стримов** ✅
+`stop()` закрывал loopback-стрим, пока поток `lb-reader` стоял внутри blocking `read()` →
+access violation, убивающая процесс (дамп 11.06 в `app.log`). Теперь `stop()` трогает
+только mic, разрушение сведено в один `finally` после `join` reader'а, а если reader
+застрял — стрим намеренно не закрывается. Заодно закрывается `ThreadPoolExecutor`
+оценки качества, который создавался на каждую сессию и жил до конца процесса.
+
 **Логирование действий пользователя** ✅
 `app.user_actions.log_action(name, **kwargs)` — все клики по tray/меню/диалогам пишутся в `app.log` с префиксом `app.user_action`.
 

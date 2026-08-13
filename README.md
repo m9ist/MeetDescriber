@@ -25,6 +25,7 @@
 - ✅ Спектр-визуализатор АЧХ при записи
 - ✅ Alert «⚠ Микрофон лагает» при drift >5s между mic и loopback
 - ✅ Логирование UI-действий пользователя в `app.log`
+- ✅ Heartbeat и логирование любого варианта выхода — если приложение исчезло, в логе видно почему
 - ✅ Утилита разовой транскрипции файла: `python tools/transcribe_file.py <file>` (см. `docs/TRANSCRIBE_FILE.md`)
 
 ## Быстрый старт
@@ -59,6 +60,9 @@ python app/extension/install_host.py
 python -m app.main
 # или двойной клик на start_windows.vbs
 ```
+
+Логи — `app.log` в корне проекта (при >20 МБ предыдущий уезжает в `app.log.1`).
+Рядом `app.err.log` — stderr от лончера, в норме пустой.
 
 ### Установка (macOS)
 

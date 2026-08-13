@@ -35,7 +35,7 @@ source .venv/bin/activate && python -m app.main
 # Windows
 python -m app.main
 # логи: Get-Content app.log -Wait
-# или двойной клик: start_windows.vbs
+# или двойной клик: start_windows.vbs (лончер кладёт stderr в app.err.log)
 ```
 
 ## Диагностика и тесты
@@ -95,7 +95,7 @@ GIGAAM_MODEL=v2_rnnt         # опционально: v2_rnnt (default) | v2_ct
 - **Пушить ТОЛЬКО по явному запросу или разрешению пользователя** — `git push` сам по себе не выполнять; каждый пуш требует отдельного «пушни»/«запушь» от пользователя
 - **Не создавать ветки** — работаем напрямую в `main`
 - Все изменения — напрямую в файлы, без временных скриптов
-- Логи пишутся в `app.log` (root проекта)
+- Логи пишутся в `app.log` (root проекта). Ротация при старте: если файл >20 МБ, предыдущий уезжает в `app.log.1`. Рядом `app.err.log` — stderr от лончера (в норме пустой, туда падает только то, что не доходит до логгера: например traceback ошибки импорта)
 - `.env` содержит секреты — никогда не коммитить (уже в .gitignore)
 
 ## Ключевые архитектурные решения
@@ -123,8 +123,38 @@ temperature=(0.0,), compression_ratio_threshold=None, log_prob_threshold=None,
 condition_on_previous_text=False, repetition_penalty=1.2, no_repeat_ngram_size=3
 ```
 
+### Capture: разрушение стримов (Windows)
+Loopback читает отдельный поток `lb-reader`, микрофон — основной поток захвата. **Loopback-стрим нельзя трогать снаружи потока захвата**: `stop_stream()`/`close()`/`pa.terminate()` под работающим blocking `read()` дают access violation, которая убивает процесс без traceback (дамп 11.06 в `app.log`). Поэтому:
+
+- `stop()` останавливает только mic-стрим (он держит основной цикл и его надо разблокировать)
+- разрушение всех стримов — в одном `finally` внутри `_capture_wasapi`, после `join` потока `lb-reader` (PortAudio блокирует `read()`, пока в системе тишина, поэтому ждём до `LB_READER_JOIN_TIMEOUT_SEC`)
+- если reader застрял — стрим намеренно **не** закрывается и `pa.terminate()` не вызывается: утечка стрима на одну сессию дешевле убитого приложения (в лог идёт `ERROR`)
+- `self._recording` сбрасывается в том же `finally`: иначе после исключения reader крутится вечно, а `is_recording` остаётся `True` и следующая запись не стартует
+
 ### Capture: drift warning
 В `_flush_chunk` логируем разницу loopback↔mic. При `|diff| > DRIFT_WARN_THRESHOLD_SEC = 5.0` срабатывает `on_drift_warning(drift_sec)` → toast «⚠ Микрофон лагает». Throttling 60 сек. Симптом: другое приложение держит mic в exclusive mode, USB-драйвер тормозит.
+
+### Наблюдаемость смерти приложения
+Приложение исчезало в простое, не оставляя следов: дампа faulthandler нет (он ловит только fault'ы вроде SIGSEGV/SIGABRT), отчёта WER нет, в `app.log` тишина — парного лога к `=== app start ===` не существовало, а stderr выбрасывался лончером со скрытым окном. Причину нельзя было определить принципиально. Что добавлено в `app/main.py`:
+
+- `atexit` + `finally` в `main()` + отдельные ветки `SystemExit`/`KeyboardInterrupt` (это `BaseException`, они проходили мимо `except Exception`)
+- `threading.excepthook` → `log.critical`: падение фонового потока больше не молчит
+- `SetConsoleCtrlHandler` (Windows): процесс консольный, при logoff/shutdown Windows гасит его штатно — без fault'а и WER. Событие пишется прямо в файл дампа, минуя logging
+- heartbeat раз в 5 минут (`HEARTBEAT_INTERVAL_MS`) со состоянием потоков трея и моста
+
+Как читать лог при следующем исчезновении:
+
+| Что в логе | Что случилось |
+|---|---|
+| heartbeat идёт, иконки нет | умер поток pystray → рядом `tray thread died` + traceback потока |
+| heartbeat обрывается, затем `run() returned` + `atexit` | штатный выход |
+| heartbeat обрывается, есть `ConsoleCtrlEvent …` | Windows погасил процесс (logoff/shutdown/закрытие консоли) |
+| heartbeat обрывается, дальше ничего | убит извне (`TerminateProcess`, снятие в диспетчере задач) |
+| heartbeat обрывается, есть дамп faulthandler | краш в C-коде |
+
+`ForMeetsTray.is_alive()/restart()`: pystray выходит из своего message loop по `break` без единой записи в лог и в `finally` снимает иконку — процесс жив, иконки нет, снаружи неотличимо от падения. Heartbeat это детектит и поднимает иконку заново (состояние меню живёт в полях `ForMeetsTray`). Рестарт explorer.exe pystray обрабатывает сам (`WM_TASKBARCREATED`), дублировать не надо.
+
+**Ротация только при старте.** В `app.log` пишут два держателя файла — `logging` и `faulthandler`; на Windows переименовать файл с открытым хендлом нельзя, и `RotatingFileHandler` на этом молча ломается. `StreamHandler(sys.stderr)` подключается только когда stderr — терминал (`isatty()`): под лончером он превращал `app.err.log` в полную копию `app.log`.
 
 ### Логирование действий пользователя
 Каждое UI-действие пишется в app.log через `app.user_actions.log_action(name, **kwargs)`. Префикс логгера — `app.user_action`. Покрыты: tray-меню, контекстные меню в meetings_window, кнопки start/stop, диалоги. При добавлении нового действия — обязательно вызвать `log_action`.
