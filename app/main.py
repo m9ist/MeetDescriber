@@ -40,17 +40,26 @@ import config
 _LOG_PATH = config.ROOT_DIR / "app.log"
 _LOG_MAX_BYTES = 20 * 1024 * 1024
 
-# Ротация именно при старте, а не по размеру во время работы: в app.log пишут ДВА
-# держателя файла — logging и faulthandler (ниже), а на Windows переименовать файл
-# с открытым хендлом нельзя, RotatingFileHandler на этом молча ломается. Здесь же
-# ни один хендл ещё не открыт.
-if _LOG_PATH.exists() and _LOG_PATH.stat().st_size > _LOG_MAX_BYTES:
-    _prev = _LOG_PATH.with_suffix(".log.1")
+
+def _rotate_if_big(path: Path) -> None:
+    """Ротация при старте, а не по размеру во время работы.
+
+    В app.log пишут ДВА держателя файла — logging и faulthandler (ниже), а на
+    Windows переименовать файл с открытым хендлом нельзя: RotatingFileHandler на
+    этом молча ломается. В момент старта ни один хендл ещё не открыт.
+    """
+    if not path.exists() or path.stat().st_size <= _LOG_MAX_BYTES:
+        return
+    prev = path.with_suffix(path.suffix + ".1")
     try:
-        _prev.unlink(missing_ok=True)
-        _LOG_PATH.rename(_prev)
+        prev.unlink(missing_ok=True)
+        path.rename(prev)
     except OSError:
         pass  # файл занят другим инстансом — пишем дальше в тот же
+
+
+_rotate_if_big(_LOG_PATH)
+_rotate_if_big(config.ROOT_DIR / "app.err.log")  # stderr от лончера
 
 # faulthandler пишет напрямую через OS write() — работает даже при SIGABRT.
 # Направляем в app.log чтобы трейсбек был там, а не только в терминале.
@@ -65,13 +74,22 @@ class _FlushFileHandler(logging.FileHandler):
         self.flush()
 
 
+_handlers: list[logging.Handler] = [_FlushFileHandler(_LOG_PATH, encoding="utf-8")]
+# Дублировать лог в stderr есть смысл только когда там терминал (запуск руками:
+# python -m app.main). Под лончером stderr перенаправлен в app.err.log, и такой
+# handler превращал бы его во вторую полную копию app.log; нужны там только
+# сообщения, до логгера не доходящие — traceback'и уровня интерпретатора.
+try:
+    _stderr_is_tty = bool(sys.stderr and sys.stderr.isatty())
+except (AttributeError, ValueError):
+    _stderr_is_tty = False
+if _stderr_is_tty:
+    _handlers.append(logging.StreamHandler(sys.stderr))
+
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-    handlers=[
-        _FlushFileHandler(_LOG_PATH, encoding="utf-8"),
-        logging.StreamHandler(sys.stderr),
-    ],
+    handlers=_handlers,
 )
 log = logging.getLogger("app")
 log.info("=== app start ===")
