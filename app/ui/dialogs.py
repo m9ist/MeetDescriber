@@ -331,7 +331,7 @@ class ClaudeManualDialog:
                             stdin=fh,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
-                            timeout=300,
+                            timeout=config.CLAUDE_RUN_TIMEOUT_SEC,
                             cwd=str(config.ROOT_DIR),
                         )
                 finally:

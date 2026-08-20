@@ -73,6 +73,12 @@ WHISPER_LANGUAGE = "ru"
 TRANSCRIPTION_ENGINE = os.getenv("TRANSCRIPTION_ENGINE", "gigaam")
 GIGAAM_MODEL = os.getenv("GIGAAM_MODEL", "v2_rnnt")  # v2_rnnt | v2_ctc
 
+# Claude CLI — таймауты
+# Длинные встречи анализируются десятки минут: 5 мин (прежнее значение)
+# убивало claude на середине.
+CLAUDE_RUN_TIMEOUT_SEC = 3600      # сколько ждём сам claude -p
+CLAUDE_DIALOG_TIMEOUT_SEC = 7200   # сколько pipeline ждёт результат из диалога
+
 # Claude CLI — путь к исполняемому файлу
 # Задаётся через CLAUDE_CLI в .env (например C:/Users/Oleg/.local/bin/claude.exe).
 # Фолбек: платформо-зависимые типичные пути, затем PATH, затем "claude".

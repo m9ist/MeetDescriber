@@ -633,7 +633,7 @@ class App:
                     chat_prompt=chat_prompt, output_path=output_path,
                 )
             )
-            return result_q.get(timeout=1800)  # 30 мин
+            return result_q.get(timeout=config.CLAUDE_DIALOG_TIMEOUT_SEC)
 
         return ask_claude
 
