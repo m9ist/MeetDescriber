@@ -672,7 +672,8 @@ def _evaluate_quality(path: Path, idx: int, callback: Optional[OnQualityLow]) ->
         if score < config.QUALITY_THRESHOLD and callback:
             callback(idx, score)
     except Exception:
-        pass
+        import logging
+        logging.getLogger(__name__).warning("оценка качества чанка %s не удалась", path, exc_info=True)
 
 
 _quality_model = None
