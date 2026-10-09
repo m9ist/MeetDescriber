@@ -462,11 +462,8 @@ class AudioCapture:
                 mc_buf.extend(raw)
                 tap_peek = bytes(tap_buf[-tap_peek_size:]) if len(tap_buf) >= tap_peek_size else None
             if self.on_audio_frame:
-                # Спектр показывает микс tap + mic в формате tap (stereo), как на Windows
-                if tap_peek:
-                    self.on_audio_frame(_mix_audio(tap_peek, raw, self._channels, mic_channels))
-                else:
-                    self.on_audio_frame(_mix_audio(b"", raw, self._channels, mic_channels))
+                # Спектр показывает микс tap + mic в формате tap (stereo); пока tap пуст — только mic
+                self.on_audio_frame(_mix_audio(tap_peek or b"", raw, self._channels, mic_channels))
 
         def flush_chunk():
             """Снимает накопленное и микширует mic + tap."""
