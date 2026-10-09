@@ -86,6 +86,17 @@ audiotee уже умеет `--include-processes <pids...>` / `--exclude-processe
 Полный прогон: запуск → запись реального совещания → обработка → проверка всех 3 документов.
 Проверить H8: качество транскрипции при воспроизведении записи на скорости 2×.
 
+**B17 — Тултипы в окне совещаний: убрать `win.after()` на Mac**
+`MeetingsWindow._on_motion` (`app/ui/meetings_window.py`) откладывает показ тултипа через
+`self._win.after(500, ...)` и снимает через `after_cancel`. На Mac это известный путь
+к SIGABRT `_Py_FatalError_TstateNULL`: если в момент срабатывания таймера открыто меню
+трея (вложенный NSMenu loop), Tk зовёт Python без GIL (см. CLAUDE.md, «`root.after()` опасен»).
+Нужно:
+- передавать в `MeetingsWindow` `schedule_fn=App._schedule` (как `SpectrumWidget`,
+  `ProcessingStatusWindow`), создаётся в `app/main.py`
+- отложенный показ — через `schedule_fn(fn, 500)` с отменой по токену/счётчику вместо `after_cancel`
+- проверить, нет ли других `after()` в `meetings_window.py` и диалогах
+
 ---
 
 ## Другое
