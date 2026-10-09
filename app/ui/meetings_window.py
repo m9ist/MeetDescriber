@@ -102,7 +102,7 @@ class MeetingsWindow:
         self._reload_meetings()
 
         # На Mac WM_DELETE_WINDOW зовётся из NSControlTrackMouse → SIGABRT.
-        # Прячем кнопку X — закрытие через ESC или меню.
+        # Прячем кнопку X — закрытие через ESC или кнопку «Закрыть».
         if config.IS_MAC:
             from app.ui.mac_window import harden_for_mac
             harden_for_mac(win)
@@ -185,6 +185,11 @@ class MeetingsWindow:
         )
 
         _btn_kw = {"padx": 8, "pady": 4} if config.IS_WINDOWS else {"padx": 8}
+        # На Mac крестика нет (harden_for_mac), а ESC не срабатывает, если фокус
+        # не вернулся в окно после диалога — нужна явная кнопка.
+        tk.Button(bottom, text="Закрыть", command=self._on_close, **_btn_kw).pack(
+            side="right", padx=(8, 0)
+        )
         tk.Button(
             bottom,
             text="Удалить аудио старше 14 дней",
