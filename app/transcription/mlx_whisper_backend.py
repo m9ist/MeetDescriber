@@ -20,6 +20,10 @@ from app.transcription.backend import (
 
 log = logging.getLogger(__name__)
 
+# MLX/Metal не потокобезопасен: любые mlx_whisper.transcribe в процессе (основная
+# транскрипция, оценка качества чанков) должны идти строго по одному, иначе SIGSEGV.
+MLX_LOCK = threading.Lock()
+
 
 def unload() -> None:
     """No-op: mlx-whisper не кэширует модель между вызовами."""
@@ -68,7 +72,7 @@ class MLXWhisperBackend(TranscriptionBackend):
         # Перенаправляем stdout/stderr в logger чтобы это попадало в app.log.
         stdout_redirect = _LogWriter("[mlx-whisper] ")
         try:
-            with redirect_stdout(stdout_redirect), redirect_stderr(stdout_redirect):
+            with MLX_LOCK, redirect_stdout(stdout_redirect), redirect_stderr(stdout_redirect):
                 result = mlx_whisper.transcribe(
                     str(audio_path),
                     path_or_hf_repo=f"mlx-community/whisper-{config.WHISPER_MODEL}-mlx",
