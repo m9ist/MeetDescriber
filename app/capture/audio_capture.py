@@ -444,6 +444,9 @@ class AudioCapture:
         def tap_on_frame(raw: bytes) -> None:
             with buf_lock:
                 tap_buf.extend(raw)
+            # Без микрофона спектр кормится только tap'ом
+            if mic_idx is None and self.on_audio_frame:
+                self.on_audio_frame(raw)
 
         def tap_on_error(exc: Exception) -> None:
             log.error("audiotee error: %s", exc)
@@ -454,10 +457,16 @@ class AudioCapture:
             if not self._recording:
                 raise sd.CallbackStop()
             raw = indata.tobytes()
+            tap_peek_size = frames * tap_sample_size
             with buf_lock:
                 mc_buf.extend(raw)
+                tap_peek = bytes(tap_buf[-tap_peek_size:]) if len(tap_buf) >= tap_peek_size else None
             if self.on_audio_frame:
-                self.on_audio_frame(raw)
+                # Спектр показывает микс tap + mic в формате tap (stereo), как на Windows
+                if tap_peek:
+                    self.on_audio_frame(_mix_audio(tap_peek, raw, self._channels, mic_channels))
+                else:
+                    self.on_audio_frame(_mix_audio(b"", raw, self._channels, mic_channels))
 
         def flush_chunk():
             """Снимает накопленное и микширует mic + tap."""
