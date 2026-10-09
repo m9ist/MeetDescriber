@@ -700,14 +700,18 @@ class _MlxQualityModel:
 
     def __init__(self, mlx_whisper_module) -> None:
         self._mlx = mlx_whisper_module
+        # MLX/Metal не потокобезопасен: два transcribe параллельно из пула quality
+        # (два чанка подряд при остановке записи) → SIGSEGV в decoding._main_loop.
+        self._lock = threading.Lock()
 
     def transcribe(self, path: str, language: str = "ru", word_timestamps: bool = False):
-        result = self._mlx.transcribe(
-            path,
-            path_or_hf_repo="mlx-community/whisper-tiny-mlx",
-            language=language,
-            word_timestamps=word_timestamps,
-        )
+        with self._lock:
+            result = self._mlx.transcribe(
+                path,
+                path_or_hf_repo="mlx-community/whisper-tiny-mlx",
+                language=language,
+                word_timestamps=word_timestamps,
+            )
         segments = [_MlxSegment(s) for s in result.get("segments", [])]
         return segments, result
 
