@@ -10,12 +10,18 @@
     widget.show()
     ...
     widget.hide()
+
+Остановка записи занимает секунды (ждём поток захвата и lb-reader, см.
+AudioCapture.stop). Чтобы это было видно, на это время виджет переходит в
+режим «завершаю»: begin_stopping(stage_fn) — серые затухающие бары, этап и
+таймер; end_stopping(ok) — короткий итог и закрытие окна.
 """
 from __future__ import annotations
 
 import logging
 import struct
 import threading
+import time
 import tkinter as tk
 import traceback
 from typing import Optional
@@ -35,6 +41,7 @@ PAD = 5
 UPDATE_MS = 50          # 20 fps
 DECAY = 0.78            # плавное затухание баров
 BUFFER_FRAMES = 2048    # кол-во PCM-фреймов в кольцевом буфере
+DONE_HOLD_MS = 1500     # сколько держать итог остановки перед закрытием
 
 
 class SpectrumWidget:
@@ -49,6 +56,15 @@ class SpectrumWidget:
         self._channels = 2
 
         self._smoothed = [0.0] * N_BARS
+
+        # "rec" | "stopping" | "done_ok" | "done_warn"
+        self._state = "rec"
+        self._stage_fn = None
+        self._stop_t0 = 0.0
+        self._stop_elapsed = 0.0
+        # Поколение окна: отложенное закрытие после итога не должно снести
+        # окно новой записи, если она успела стартовать.
+        self._gen = 0
 
         # На Mac обязателен schedule_fn (App._schedule) — root.after() небезопасен:
         # tick 20Hz вместе с NSMenuTrackingSession → SIGABRT _Py_FatalError_TstateNULL.
@@ -68,6 +84,27 @@ class SpectrumWidget:
     def hide(self) -> None:
         self._schedule(self._destroy_window)
 
+    def begin_stopping(self, stage_fn=None) -> None:
+        """Режим «завершаю запись». stage_fn() → строка текущего этапа."""
+        def go():
+            self._state = "stopping"
+            self._stage_fn = stage_fn
+            self._stop_t0 = time.monotonic()
+        self._schedule(go)
+
+    def end_stopping(self, ok: bool) -> None:
+        """Показывает итог остановки и закрывает окно через DONE_HOLD_MS."""
+        def go():
+            self._stop_elapsed = time.monotonic() - self._stop_t0
+            self._state = "done_ok" if ok else "done_warn"
+            gen = self._gen
+
+            def close():
+                if gen == self._gen:
+                    self._destroy_window()
+            self._schedule(close, DONE_HOLD_MS)
+        self._schedule(go)
+
     def push_frame(self, raw: bytes) -> None:
         """Вызывается из потока захвата на каждый read (512 фреймов)."""
         with self._lock:
@@ -84,6 +121,11 @@ class SpectrumWidget:
     # ── Окно ────────────────────────────────────────────────────────────────
 
     def _create_window(self) -> None:
+        self._gen += 1
+        self._state = "rec"
+        self._stage_fn = None
+        with self._lock:
+            self._buf = bytearray()
         if self._win and self._win.winfo_exists():
             return
 
@@ -145,6 +187,12 @@ class SpectrumWidget:
         except tk.TclError:
             return
         try:
+            if self._state != "rec":
+                # Захват уже не пишет — бары гаснут, звук больше не анализируем.
+                self._smoothed = [v * DECAY for v in self._smoothed]
+                self._draw(self._smoothed)
+                self._schedule(self._tick, UPDATE_MS)
+                return
             bars = self._compute_bars()
             if self._compute_rms() < config.SILENCE_THRESHOLD_RMS:
                 self._smoothed = [0.0] * N_BARS
@@ -228,10 +276,8 @@ class SpectrumWidget:
         # Фон
         c.create_rectangle(0, 0, WIDTH, HEIGHT, fill="#111111", outline="")
 
-        # REC-точка
-        c.create_oval(5, 5, 13, 13, fill="#ff2222", outline="")
-        c.create_text(17, 9, text="REC", fill="#ff5555",
-                      anchor="w", font=(config.UI_FONT, 7, "bold"))
+        self._draw_header(c)
+        gray = self._state != "rec"
 
         # Бары
         usable_w = WIDTH - PAD * 2
@@ -252,10 +298,39 @@ class SpectrumWidget:
                 r = 220
                 g = int((1.0 - (v - 0.5) * 2) * 210)
             b = 30
-            color = f"#{r:02x}{g:02x}{b:02x}"
+            color = "#555555" if gray else f"#{r:02x}{g:02x}{b:02x}"
 
             c.create_rectangle(x0, y_top, x1, y_bot, fill=color, outline="")
 
-        # Тонкая рамка
+        # Тонкая рамка; в режиме остановки — цветом состояния
+        border = {"stopping": "#ff9900", "done_ok": "#33cc55",
+                  "done_warn": "#ffcc00"}.get(self._state, "#333333")
         c.create_rectangle(0, 0, WIDTH - 1, HEIGHT - 1,
-                           outline="#333333", width=1)
+                           outline=border, width=1 if self._state == "rec" else 2)
+
+    def _draw_header(self, c: tk.Canvas) -> None:
+        font = (config.UI_FONT, 7, "bold")
+        if self._state == "rec":
+            c.create_oval(5, 5, 13, 13, fill="#ff2222", outline="")
+            c.create_text(17, 9, text="REC", fill="#ff5555", anchor="w", font=font)
+            return
+        if self._state == "stopping":
+            elapsed = time.monotonic() - self._stop_t0
+            stage = ""
+            if self._stage_fn is not None:
+                try:
+                    stage = self._stage_fn() or ""
+                except Exception:
+                    log.error("spectrum stage_fn error", exc_info=True)
+            # Мигающий квадрат «стоп» — видно, что UI жив и ждёт.
+            if int(elapsed * 2) % 2 == 0:
+                c.create_rectangle(5, 5, 13, 13, fill="#ff9900", outline="")
+            text = f"ЗАВЕРШАЮ · {stage} · {elapsed:.1f} с" if stage                 else f"ЗАВЕРШАЮ · {elapsed:.1f} с"
+            c.create_text(17, 9, text=text, fill="#ffaa33", anchor="w", font=font)
+            return
+        if self._state == "done_ok":
+            text, color = f"✓ ЗАПИСЬ ЗАВЕРШЕНА · {self._stop_elapsed:.1f} с", "#55dd77"
+        else:
+            text, color = (f"⚠ ЗАВЕРШЕНО С ЗАВИСАНИЕМ · {self._stop_elapsed:.1f} с",
+                           "#ffcc33")
+        c.create_text(5, 9, text=text, fill=color, anchor="w", font=font)

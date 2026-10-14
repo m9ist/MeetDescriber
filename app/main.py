@@ -25,6 +25,7 @@ import queue
 import re
 import shutil
 import threading
+import time
 import tkinter as tk
 import traceback
 from datetime import datetime, timezone
@@ -181,6 +182,9 @@ class App:
         self._skip_tab_ids: set[int] = set()  # встречи помеченные "не записывать"
         self._latest_tabs: list[dict] = []    # последний известный список вкладок Chrome
         self._current_tab_id: Optional[int] = None  # Meet-вкладка активной записи (для meet_title)
+        # Идёт остановка захвата в фоне (см. _stop_capture_async): новую запись
+        # не стартуем, пока прежние стримы и PortAudio не разрушены.
+        self._stopping: bool = False
         # На Mac: PyObjC callbacks не могут безопасно вызывать tkinter напрямую.
         # Все tkinter-операции передаём через эту очередь и выполняем в main loop.
         self._mac_queue: queue.SimpleQueue = queue.SimpleQueue()
@@ -498,6 +502,9 @@ class App:
     ) -> None:
         if self._capture and self._capture.is_recording:
             return
+        if self._stopping:
+            log.warning("start_session %r ignored: previous capture still stopping", title)
+            return
 
         now = datetime.now(timezone.utc).isoformat()
         with get_conn() as conn:
@@ -531,18 +538,44 @@ class App:
             log.info("no capture active, returning")
             return
 
-        log.info("stopping capture...")
-        self._capture.stop()
-        self._capture = None
-        self._current_tab_id = None
-        log.info("capture stopped")
-        self._spectrum.hide()
-
         session_id = self._current_session_id
         title = self._current_title
         self._current_session_id = None
         self._current_title = ""
+        self._stop_capture_async(lambda: self._after_capture_stopped(session_id, title))
 
+    def _stop_capture_async(self, then) -> None:
+        """Останавливает захват в фоновом потоке, затем then() в главном.
+
+        AudioCapture.stop() блокирует до ~15 с (join потока захвата и lb-reader).
+        В главном потоке это замораживало Tk — остановку не было видно. Теперь
+        спектр на это время показывает этап и таймер (SpectrumWidget.begin_stopping).
+        """
+        capture = self._capture
+        self._capture = None
+        self._current_tab_id = None
+        self._stopping = True
+        self._spectrum.begin_stopping(lambda: capture.stop_stage)
+        log.info("stopping capture...")
+
+        def worker():
+            ok = False
+            t0 = time.monotonic()
+            try:
+                ok = capture.stop()
+            except Exception:
+                log.error("capture stop failed", exc_info=True)
+            log.info("capture stopped in %.1fs (clean=%s)", time.monotonic() - t0, ok)
+
+            def done():
+                self._stopping = False
+                self._spectrum.end_stopping(ok)
+                then()
+            self._schedule(done)
+
+        threading.Thread(target=worker, daemon=True, name="capture-stop").start()
+
+    def _after_capture_stopped(self, session_id: Optional[int], title: str) -> None:
         if session_id is None:
             return
 
@@ -582,16 +615,13 @@ class App:
             return
 
         log.info("discarding current session (skip recording)")
-        self._capture.stop()
-        self._capture = None
-        self._current_tab_id = None
-        self._spectrum.hide()
-
         session_id = self._current_session_id
         self._current_session_id = None
         self._current_title = ""
         self._tray.set_recording(False)
+        self._stop_capture_async(lambda: self._after_capture_discarded(session_id))
 
+    def _after_capture_discarded(self, session_id: Optional[int]) -> None:
         if session_id is None:
             return
 

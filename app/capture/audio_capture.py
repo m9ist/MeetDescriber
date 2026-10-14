@@ -82,6 +82,11 @@ class AudioCapture:
         self._loopback_stream = None
         self._mic_stream = None
 
+        # Текущий этап остановки — для индикации на спектре (пишется потоками
+        # захвата и stop(), читается UI; присваивание str атомарно).
+        self.stop_stage: str = ""
+        self.lb_stuck: bool = False
+
     def start(self, device_index: Optional[int] = None) -> None:
         """Запускает захват в фоновом потоке."""
         if self._recording:
@@ -97,8 +102,12 @@ class AudioCapture:
         )
         self._thread.start()
 
-    def stop(self) -> None:
-        """Останавливает захват. Блокирует до завершения потока."""
+    def stop(self) -> bool:
+        """Останавливает захват. Блокирует до завершения потока.
+
+        Возвращает True, если поток захвата и lb-reader вышли штатно.
+        """
+        self.stop_stage = "останавливаю микрофон"
         self._recording = False
         # Только микрофон: его read() держит основной цикл захвата, и его надо
         # разблокировать. Loopback-стрим отсюда НЕ трогаем — его читает поток
@@ -110,12 +119,17 @@ class AudioCapture:
                 self._mic_stream.stop_stream()
             except Exception:
                 pass
+        thread_stuck = False
         if self._thread:
+            if self.stop_stage == "останавливаю микрофон":
+                self.stop_stage = "жду поток захвата"
             self._thread.join(timeout=10)
+            thread_stuck = self._thread.is_alive()
             self._thread = None
         # Пул оценки качества создаётся на каждую сессию и живёт не-демон
         # потоками до конца процесса, если его не закрыть.
         self._executor.shutdown(wait=False)
+        return not (thread_stuck or self.lb_stuck)
 
     @property
     def is_recording(self) -> bool:
@@ -342,8 +356,11 @@ class AudioCapture:
             # оставляем loopback открытым: утечка стрима на одну сессию дешевле
             # убитого приложения.
             if lb_thread is not None:
+                self.stop_stage = "жду loopback-reader"
                 lb_thread.join(timeout=LB_READER_JOIN_TIMEOUT_SEC)
             lb_stuck = lb_thread is not None and lb_thread.is_alive()
+            self.lb_stuck = lb_stuck
+            self.stop_stage = "закрываю стримы"
             if lb_stuck:
                 log.error("lb-reader не вышел из read() за %.0f с — не закрываем "
                           "loopback-стрим и не терминируем PortAudio",
