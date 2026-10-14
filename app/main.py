@@ -188,6 +188,7 @@ class App:
         self._stopping: bool = False
         self._stop_thread: Optional[threading.Thread] = None
         self._pending_start: Optional[dict] = None
+        self._quitting: bool = False  # после _on_quit новые записи не стартуют
         # На Mac: PyObjC callbacks не могут безопасно вызывать tkinter напрямую.
         # Все tkinter-операции передаём через эту очередь и выполняем в main loop.
         self._mac_queue: queue.SimpleQueue = queue.SimpleQueue()
@@ -403,6 +404,12 @@ class App:
     def _handle_meet_ended(self, msg: dict) -> None:
         tab_id = msg.get("tab_id")
         self._skip_tab_ids.discard(tab_id)
+        if self._pending_start is not None and tab_id != self._current_tab_id:
+            # Поздний meet_ended прежней встречи, пока новая ждёт старта, —
+            # отложенную запись новой встречи он отменять не должен.
+            log.info("meet_ended for tab %s ignored: pending start for tab %s",
+                     tab_id, self._current_tab_id)
+            return
         self._current_tab_id = None
         self._schedule(self._stop_and_offer_processing)
 
@@ -413,8 +420,9 @@ class App:
         title = self._clean_meet_title(msg.get("title", ""))
         if not title or title in ("Meet", "Google Meet"):
             return
-        if tab_id == self._current_tab_id and self._pending_start is not None:
-            self._pending_start["title"] = title  # захват ещё ждёт остановки прежнего
+        pending = self._pending_start  # снимок: главный поток может обнулить его в done()
+        if tab_id == self._current_tab_id and pending is not None:
+            pending["title"] = title  # захват ещё ждёт остановки прежнего
             return
         if tab_id != self._current_tab_id or self._current_session_id is None:
             return
@@ -508,7 +516,13 @@ class App:
     ) -> None:
         if self._capture and self._capture.is_recording:
             return
+        if self._quitting:
+            log.info("start_session %r ignored: app is quitting", title)
+            return
         if self._stopping:
+            if self._pending_start is not None:
+                log.warning("pending start %r replaced by %r",
+                            self._pending_start["title"], title)
             log.info("start_session %r deferred: previous capture still stopping", title)
             self._pending_start = dict(title=title, agenda=agenda, source=source,
                                        device_index=device_index)
@@ -564,12 +578,6 @@ class App:
         спектр на это время показывает этап и таймер (SpectrumWidget.begin_stopping).
         """
         capture = self._capture
-        self._capture = None
-        self._current_tab_id = None
-        self._stopping = True
-        log.info("stopping capture...")
-        self._spectrum.begin_stopping(lambda: capture.stop_stage)
-        self._tray.set_recording(False)
 
         def worker():
             ok = False
@@ -591,8 +599,16 @@ class App:
                     self._start_session(**pending)
             self._schedule(done)
 
+        # Поток — до обнуления _capture: _on_quit (поток трея) не должен застать
+        # момент, когда записи уже нет, а потока остановки ещё нет.
         self._stop_thread = threading.Thread(target=worker, daemon=True, name="capture-stop")
         self._stop_thread.start()
+        self._stopping = True
+        log.info("stopping capture...")
+        self._capture = None
+        self._current_tab_id = None
+        self._spectrum.begin_stopping(lambda: capture.stop_stage)
+        self._tray.set_recording(False)
 
     def _after_capture_stopped(self, session_id: Optional[int], title: str) -> None:
         if session_id is None:
@@ -886,14 +902,18 @@ class App:
                      "".join(traceback.format_exception(exc_type, exc_val, exc_tb)))
 
     def _on_quit(self) -> None:
-        if self._capture and self._capture.is_recording:
-            self._capture.stop()
-        # Фоновая остановка ещё разрушает стримы: daemon-поток, убитый на выходе
-        # посреди close()/pa.terminate(), — тот самый краш, от которого защищались.
+        # Иначе done() фоновой остановки запустит отложенную запись уже после
+        # проверки ниже, и её потоки умрут на выходе посреди read()/terminate().
+        self._quitting = True
+        self._pending_start = None
         stop_thread = self._stop_thread
         if stop_thread is not None:
+            # Фоновая остановка ещё разрушает стримы: daemon-поток, убитый на выходе
+            # посреди close()/pa.terminate(), — тот самый краш, от которого защищались.
             log.info("quit: waiting for capture-stop thread")
             stop_thread.join(timeout=20)
+        elif self._capture and self._capture.is_recording:
+            self._capture.stop()
         self._running = False
         self._schedule(self._root.quit)
 
