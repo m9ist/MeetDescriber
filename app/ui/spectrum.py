@@ -9,7 +9,7 @@
     capture.on_audio_frame = widget.push_frame
     widget.show()
     ...
-    widget.hide()
+    widget.begin_stopping(stage_fn); widget.end_stopping(ok)
 
 Остановка записи занимает секунды (ждём поток захвата и lb-reader, см.
 AudioCapture.stop). Чтобы это было видно, на это время виджет переходит в
@@ -80,9 +80,6 @@ class SpectrumWidget:
 
     def show(self) -> None:
         self._schedule(self._create_window)
-
-    def hide(self) -> None:
-        self._schedule(self._destroy_window)
 
     def begin_stopping(self, stage_fn=None) -> None:
         """Режим «завершаю запись». stage_fn() → строка текущего этапа."""
@@ -325,12 +322,13 @@ class SpectrumWidget:
             # Мигающий квадрат «стоп» — видно, что UI жив и ждёт.
             if int(elapsed * 2) % 2 == 0:
                 c.create_rectangle(5, 5, 13, 13, fill="#ff9900", outline="")
-            text = f"ЗАВЕРШАЮ · {stage} · {elapsed:.1f} с" if stage                 else f"ЗАВЕРШАЮ · {elapsed:.1f} с"
+            text = f"ЗАВЕРШАЮ · {stage} · {elapsed:.1f} с" if stage \
+                else f"ЗАВЕРШАЮ · {elapsed:.1f} с"
             c.create_text(17, 9, text=text, fill="#ffaa33", anchor="w", font=font)
             return
         if self._state == "done_ok":
             text, color = f"✓ ЗАПИСЬ ЗАВЕРШЕНА · {self._stop_elapsed:.1f} с", "#55dd77"
         else:
-            text, color = (f"⚠ ЗАВЕРШЕНО С ЗАВИСАНИЕМ · {self._stop_elapsed:.1f} с",
+            text, color = (f"⚠ ЗАВЕРШЕНО НЕШТАТНО · {self._stop_elapsed:.1f} с",
                            "#ffcc33")
         c.create_text(5, 9, text=text, fill=color, anchor="w", font=font)

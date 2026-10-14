@@ -130,7 +130,7 @@ Loopback читает отдельный поток `lb-reader`, микрофо�
 - разрушение всех стримов — в одном `finally` внутри `_capture_wasapi`, после `join` потока `lb-reader` (PortAudio блокирует `read()`, пока в системе тишина, поэтому ждём до `LB_READER_JOIN_TIMEOUT_SEC`)
 - если reader застрял — стрим намеренно **не** закрывается и `pa.terminate()` не вызывается: утечка стрима на одну сессию дешевле убитого приложения (в лог идёт `ERROR`)
 - `self._recording` сбрасывается в том же `finally`: иначе после исключения reader крутится вечно, а `is_recording` остаётся `True` и следующая запись не стартует
-- `stop()` блокирует до ~15 с, поэтому `App._stop_capture_async` зовёт его в фоновом потоке `capture-stop`: Tk не замерзает, а спектр показывает «ЗАВЕРШАЮ · <этап> · N с» (этап — `AudioCapture.stop_stage`), потом «✓ завершена» или «⚠ с зависанием». Пока флаг `App._stopping` поднят, новая запись не стартует
+- `stop()` блокирует до ~15 с, поэтому `App._stop_capture_async` зовёт его в фоновом потоке `capture-stop`: Tk не замерзает, а спектр показывает «ЗАВЕРШАЮ · <этап> · N с» (этап — `AudioCapture.stop_stage`), потом «✓ завершена» или «⚠ с зависанием». Пока флаг `App._stopping` поднят, новая запись откладывается в `App._pending_start` и стартует по окончании остановки; `_on_quit` дожидается потока `capture-stop`
 
 ### Capture: drift warning
 В `_flush_chunk` логируем разницу loopback↔mic. При `|diff| > DRIFT_WARN_THRESHOLD_SEC = 5.0` срабатывает `on_drift_warning(drift_sec)` → toast «⚠ Микрофон лагает». Throttling 60 сек. Симптом: другое приложение держит mic в exclusive mode, USB-драйвер тормозит.

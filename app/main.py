@@ -183,8 +183,11 @@ class App:
         self._latest_tabs: list[dict] = []    # последний известный список вкладок Chrome
         self._current_tab_id: Optional[int] = None  # Meet-вкладка активной записи (для meet_title)
         # Идёт остановка захвата в фоне (см. _stop_capture_async): новую запись
-        # не стартуем, пока прежние стримы и PortAudio не разрушены.
+        # не стартуем, пока прежние стримы и PortAudio не разрушены, — откладываем
+        # её в _pending_start и запускаем, когда остановка закончится.
         self._stopping: bool = False
+        self._stop_thread: Optional[threading.Thread] = None
+        self._pending_start: Optional[dict] = None
         # На Mac: PyObjC callbacks не могут безопасно вызывать tkinter напрямую.
         # Все tkinter-операции передаём через эту очередь и выполняем в main loop.
         self._mac_queue: queue.SimpleQueue = queue.SimpleQueue()
@@ -410,6 +413,9 @@ class App:
         title = self._clean_meet_title(msg.get("title", ""))
         if not title or title in ("Meet", "Google Meet"):
             return
+        if tab_id == self._current_tab_id and self._pending_start is not None:
+            self._pending_start["title"] = title  # захват ещё ждёт остановки прежнего
+            return
         if tab_id != self._current_tab_id or self._current_session_id is None:
             return
         if not (self._capture and self._capture.is_recording):
@@ -503,7 +509,9 @@ class App:
         if self._capture and self._capture.is_recording:
             return
         if self._stopping:
-            log.warning("start_session %r ignored: previous capture still stopping", title)
+            log.info("start_session %r deferred: previous capture still stopping", title)
+            self._pending_start = dict(title=title, agenda=agenda, source=source,
+                                       device_index=device_index)
             return
 
         now = datetime.now(timezone.utc).isoformat()
@@ -535,6 +543,10 @@ class App:
     def _stop_and_offer_processing(self) -> None:
         log.info("_stop_and_offer_processing called")
         if not self._capture or not self._capture.is_recording:
+            if self._pending_start is not None:
+                # Встреча закончилась раньше, чем успел стартовать отложенный захват.
+                log.info("pending start %r cancelled", self._pending_start["title"])
+                self._pending_start = None
             log.info("no capture active, returning")
             return
 
@@ -555,8 +567,9 @@ class App:
         self._capture = None
         self._current_tab_id = None
         self._stopping = True
-        self._spectrum.begin_stopping(lambda: capture.stop_stage)
         log.info("stopping capture...")
+        self._spectrum.begin_stopping(lambda: capture.stop_stage)
+        self._tray.set_recording(False)
 
         def worker():
             ok = False
@@ -569,11 +582,17 @@ class App:
 
             def done():
                 self._stopping = False
+                self._stop_thread = None
                 self._spectrum.end_stopping(ok)
                 then()
+                pending, self._pending_start = self._pending_start, None
+                if pending is not None:
+                    log.info("starting deferred session %r", pending["title"])
+                    self._start_session(**pending)
             self._schedule(done)
 
-        threading.Thread(target=worker, daemon=True, name="capture-stop").start()
+        self._stop_thread = threading.Thread(target=worker, daemon=True, name="capture-stop")
+        self._stop_thread.start()
 
     def _after_capture_stopped(self, session_id: Optional[int], title: str) -> None:
         if session_id is None:
@@ -583,7 +602,6 @@ class App:
         with get_conn() as conn:
             conn.execute("UPDATE sessions SET ended_at=? WHERE id=?", (now, session_id))
 
-        self._tray.set_recording(False)
         self._refresh_tray_jobs()
 
         # Создаём задание сразу (pending), берём его id
@@ -612,13 +630,16 @@ class App:
         убрать строку sessions и папку с чанками.
         """
         if not self._capture or not self._capture.is_recording:
+            if self._pending_start is not None:
+                log.info("pending start %r discarded (skip recording)",
+                         self._pending_start["title"])
+                self._pending_start = None
             return
 
         log.info("discarding current session (skip recording)")
         session_id = self._current_session_id
         self._current_session_id = None
         self._current_title = ""
-        self._tray.set_recording(False)
         self._stop_capture_async(lambda: self._after_capture_discarded(session_id))
 
     def _after_capture_discarded(self, session_id: Optional[int]) -> None:
@@ -867,6 +888,12 @@ class App:
     def _on_quit(self) -> None:
         if self._capture and self._capture.is_recording:
             self._capture.stop()
+        # Фоновая остановка ещё разрушает стримы: daemon-поток, убитый на выходе
+        # посреди close()/pa.terminate(), — тот самый краш, от которого защищались.
+        stop_thread = self._stop_thread
+        if stop_thread is not None:
+            log.info("quit: waiting for capture-stop thread")
+            stop_thread.join(timeout=20)
         self._running = False
         self._schedule(self._root.quit)
 

@@ -360,7 +360,8 @@ class AudioCapture:
                 lb_thread.join(timeout=LB_READER_JOIN_TIMEOUT_SEC)
             lb_stuck = lb_thread is not None and lb_thread.is_alive()
             self.lb_stuck = lb_stuck
-            self.stop_stage = "закрываю стримы"
+            self.stop_stage = ("loopback завис, оставляю открытым" if lb_stuck
+                               else "закрываю стримы")
             if lb_stuck:
                 log.error("lb-reader не вышел из read() за %.0f с — не закрываем "
                           "loopback-стрим и не терминируем PortAudio",
