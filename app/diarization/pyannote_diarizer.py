@@ -46,7 +46,8 @@ class PyannoteDiarizer:
             text=True,
             bufsize=1,
             cwd=str(_REPO_ROOT),
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            # pyannote 4.x по умолчанию шлёт телеметрию (длительности файлов) на otel.pyannote.ai
+            env={**os.environ, "PYTHONUNBUFFERED": "1", "PYANNOTE_METRICS_ENABLED": "false"},
         )
 
         # Форвардим stderr worker'а в app.log в реальном времени

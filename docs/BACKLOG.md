@@ -111,7 +111,7 @@ audiotee уже умеет `--include-processes <pids...>` / `--exclude-processe
 ## Сделано вне исходного бэклога
 
 **Двухмодельный пайплайн транскрипции** ✅
-GigaAM v2_rnnt (Sber, default на Windows) рядом с faster-whisper. Переключатель `TRANSCRIPTION_ENGINE`. Исследование: `research/transcribe_compare/`.
+GigaAM (Sber, default на Windows; сейчас v3_e2e_rnnt) рядом с faster-whisper. Переключатель `TRANSCRIPTION_ENGINE`. Исследование: `research/transcribe_compare/`.
 
 **Subprocess-изоляция тяжёлых ML-стадий** ✅
 ctranslate2 и PyTorch конфликтуют по `cudnn64_9.dll` → BEX64 crash. Решение — три worker-процесса (diarize / transcribe-whisper / transcribe-gigaam), JSON через stdout, `PROGRESS:` через stderr.

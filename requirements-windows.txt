@@ -14,7 +14,9 @@ gigaam @ git+https://github.com/salute-developers/GigaAM.git@7447938d791c4f3e643
 
 # PyTorch с CUDA — устанавливать отдельно по инструкции:
 # https://pytorch.org/get-started/locally/
-# pip install torch --index-url https://download.pytorch.org/whl/cu121
+# pyannote.audio 4.x требует torch>=2.8 — в индексе cu121 его нет (максимум 2.5.1),
+# а torch с PyPI на Windows собран без CUDA:
+# pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
 
 # Диаризация
 pyannote.audio==4.0.4

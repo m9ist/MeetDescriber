@@ -6,6 +6,7 @@
 Последовательно проверяет гипотезы H1–H8 и выводит отчёт.
 При провале критической гипотезы останавливается и объясняет что делать.
 """
+import os
 import sys
 import io
 import time
@@ -348,7 +349,8 @@ def check_h3_h4_transcription() -> bool:
 # ══════════════════════════════════════════════════════════════════════════
 
 def check_h5_diarization() -> bool:
-    header("H5 — Диаризация: pyannote.audio 3.1")
+    header("H5 — Диаризация: pyannote.audio 4.x, speaker-diarization-community-1")
+    os.environ.setdefault("PYANNOTE_METRICS_ENABLED", "false")  # телеметрия pyannote 4.x
 
     try:
         from pyannote.audio import Pipeline
@@ -372,13 +374,13 @@ def check_h5_diarization() -> bool:
                               (IS_MAC and torch.backends.mps.is_available())
                               else "cpu")
         pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
+            "pyannote/speaker-diarization-community-1",
             token=cfg.HUGGINGFACE_TOKEN,
         ).to(device)
         ok(f"Pipeline загружен (device: {device})")
     except Exception as e:
         fail(f"Ошибка загрузки pipeline: {e}")
-        info("Убедись что лицензия принята на huggingface.co/pyannote/speaker-diarization-3.1")
+        info("Убедись что лицензия принята на huggingface.co/pyannote/speaker-diarization-community-1")
         record_result("H5", False)
         return False
 
