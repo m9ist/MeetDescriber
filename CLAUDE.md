@@ -19,6 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Mac транскрипция: mlx-whisper (whisper-large-v3-mlx, Apple Silicon)
 - Захват: PyAudioWPatch (Win, WASAPI loopback) / `vendor/audiotee` Swift-CLI поверх Core Audio Taps (Mac, macOS 14.4+) + sounddevice (mic); WAV-чанки 10 сек (mic-driven, mix-on-flush)
 - pyannote.audio 4.0.4 (CUDA на Win, CPU на Mac), SQLite (app/storage/db.py)
+- PyTorch (Win): **2.8.0+cu128** — ставится отдельно с индекса `cu128` до `requirements-windows.txt`. Ниже 2.8 нельзя (требование pyannote 4.x), выше без нужды не поднимать — torchcodec 0.7 совместим только с 2.8; с PyPI на Windows приезжает сборка без CUDA
 - ffmpeg: через `static-ffmpeg` pip-пакет (бандлит бинарь, без admin)
 - LLM: Claude Code CLI subprocess с флагами `-p - --allowedTools Write Edit`, `cwd` = корень проекта
 - **Anthropic API намеренно не используется**: корпоративные Google Workspace аккаунты не разрешают подключать сторонние OAuth/API приложения. Используем только CLI.

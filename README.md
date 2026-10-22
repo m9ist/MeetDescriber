@@ -44,6 +44,9 @@
 # Создать venv и поставить зависимости
 python -m venv .venv
 .venv\Scripts\activate
+# torch с CUDA — ДО requirements: иначе pip возьмёт с PyPI сборку без CUDA.
+# 2.8.0 — минимум для pyannote.audio 4.x и пара к torchcodec 0.7
+pip install torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements-windows.txt
 
 # Скопировать и заполнить .env
