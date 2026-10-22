@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Стек
 - Python 3.10/3.11, tkinter, pystray, Pillow
-- Windows транскрипция: **GigaAM v2_rnnt** (Sber native RU, default) либо **faster-whisper** (large-v3, CUDA). Switch через `config.TRANSCRIPTION_ENGINE`.
+- Windows транскрипция: **GigaAM v3_e2e_rnnt** (Sber native RU, default; пакет из git, на PyPI v3 нет) либо **faster-whisper** (large-v3, CUDA). Switch через `config.TRANSCRIPTION_ENGINE`.
 - Mac транскрипция: mlx-whisper (whisper-large-v3-mlx, Apple Silicon)
 - Захват: PyAudioWPatch (Win, WASAPI loopback) / `vendor/audiotee` Swift-CLI поверх Core Audio Taps (Mac, macOS 14.4+) + sounddevice (mic); WAV-чанки 10 сек (mic-driven, mix-on-flush)
 - pyannote.audio 4.0.4 (CUDA на Win, CPU на Mac), SQLite (app/storage/db.py)
@@ -81,10 +81,10 @@ research/
 
 ## Переменные окружения (.env)
 ```
-HUGGINGFACE_TOKEN=...        # обязательно — gated pyannote (speaker-diarization-3.1) + GigaAM longform VAD
+HUGGINGFACE_TOKEN=...        # обязательно — gated pyannote (speaker-diarization-community-1) + GigaAM longform VAD
 CLAUDE_CLI=...               # опционально — путь к claude CLI (иначе автодетект)
 TRANSCRIPTION_ENGINE=gigaam  # опционально: gigaam (default Win) | whisper
-GIGAAM_MODEL=v2_rnnt         # опционально: v2_rnnt (default) | v2_ctc
+GIGAAM_MODEL=v3_e2e_rnnt     # опционально: v3_e2e_rnnt (default) | v3_rnnt | v3_e2e_ctc | v3_ctc
 ```
 Автодетект claude CLI: `%APPDATA%\Claude\claude-code\*\claude.exe` (Win) → `~/Library/Application Support/Claude/claude-code-vm/*/claude` (Mac) → fallback: `shutil.which("claude")`.
 
@@ -114,7 +114,7 @@ VRAM освобождается автоматически при exit worker'а
 ### Транскрипция: переключатель движка
 - `config.TRANSCRIPTION_ENGINE = "gigaam"` (default) | `"whisper"`
 - `app/transcription/backend.py:get_backend(engine=None)` — factory
-- GigaAM: лучше покрытие на сложном аудио, без пунктуации, ~28x realtime
+- GigaAM: лучше покрытие на сложном аудио, ~25x realtime. `v3_e2e_*` дают пунктуацию, заглавные и числа цифрами (каждый VAD-чанк начинается с заглавной); `v3_rnnt`/`v3_ctc` — голый текст. С gigaam 0.2.0 `model.transcribe()` возвращает `TranscriptionResult`, текст — в `.text`
 - faster-whisper: пунктуация + капитализация, ~8x realtime, может терять чанки с длинными внутренними паузами (см. research/transcribe_compare/README.md)
 
 Для faster-whisper жёстко зафиксированы параметры против зависаний:

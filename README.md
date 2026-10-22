@@ -17,7 +17,7 @@
 - ✅ Захват системного аудио (WASAPI loopback на Windows, Core Audio Tap на macOS 14.4+)
 - ✅ Автодетект Google Meet через Chrome расширение
 - ✅ Транскрипция:
-  - Windows: **GigaAM v2_rnnt** (Sber, default) или faster-whisper (large-v3) — переключатель `TRANSCRIPTION_ENGINE`
+  - Windows: **GigaAM v3_e2e_rnnt** (Sber, default, с пунктуацией) или faster-whisper (large-v3) — переключатель `TRANSCRIPTION_ENGINE`
   - macOS: mlx-whisper / Apple Silicon
 - ✅ Диаризация спикеров (pyannote.audio 4.x, CUDA на Win)
 - ✅ LLM-анализ и follow-up через `claude -p` (подписка Claude.ai)
@@ -134,10 +134,10 @@ YYYY-MM-DD_<title>_followup_prompt.md   ← промпт для ручного �
 
 | Переменная | Описание |
 |------------|----------|
-| `HUGGINGFACE_TOKEN` | Токен HuggingFace (gated repos: pyannote/speaker-diarization-3.1) |
+| `HUGGINGFACE_TOKEN` | Токен HuggingFace (gated repo: pyannote/speaker-diarization-community-1) |
 | `CLAUDE_CLI` | Путь к `claude.exe` (опционально — обнаруживается автоматически) |
 | `TRANSCRIPTION_ENGINE` | `gigaam` (default на Win) или `whisper` — выбор движка транскрипции |
-| `GIGAAM_MODEL` | `v2_rnnt` (default) или `v2_ctc` — модель GigaAM |
+| `GIGAAM_MODEL` | `v3_e2e_rnnt` (default), `v3_rnnt`, `v3_e2e_ctc`, `v3_ctc` — модель GigaAM |
 | `HF_HUB_DISABLE_SYMLINKS_WARNING` | Установить `1` на Windows без Developer Mode |
 
 ## Дополнительные документы

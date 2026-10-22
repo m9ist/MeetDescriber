@@ -5,7 +5,7 @@ Worker-процесс транскрипции через GigaAM (Sber, native R
 что torch/cuDNN из gigaam не конфликтуют с ctranslate2 в parent.
 
 Вход:  argv[1] = путь к аудиофайлу
-       argv[2] = (опц.) модель: v2_rnnt | v2_ctc
+       argv[2] = (опц.) модель: v3_e2e_rnnt | v3_rnnt | v3_ctc | v3_e2e_ctc | v2_*
 Выход: JSON {segments, language, duration} в stdout
        PROGRESS:cur/total + логи — в stderr
 
@@ -15,7 +15,7 @@ Worker-процесс транскрипции через GigaAM (Sber, native R
   3. GigaAM транскрибирует каждый чанк
   4. Сегменты возвращаются с реальными таймстампами из VAD
 
-Без пунктуации/диаризации (это не задача транскрипционного движка).
+Пунктуацию дают только e2e-модели (v3_e2e_*); диаризация — не задача движка.
 """
 import sys
 
@@ -163,7 +163,7 @@ def main() -> None:
             wf.setframerate(sample_rate)
             wf.writeframes(chunk_i16.tobytes())
         try:
-            text = model.transcribe(str(tmp_wav)).strip()
+            text = model.transcribe(str(tmp_wav)).text.strip()
         finally:
             try: tmp_wav.unlink()
             except OSError: pass

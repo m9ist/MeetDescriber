@@ -73,7 +73,7 @@ def main() -> None:
         from pyannote.audio import Pipeline
 
     log.info("loading pyannote pipeline...")
-    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
+    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-community-1")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     pipeline.to(torch.device(device))

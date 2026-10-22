@@ -68,10 +68,10 @@ WHISPER_LANGUAGE = "ru"
 # Транскрипционный движок (Windows; на Mac всегда mlx-whisper):
 #   "whisper" — faster-whisper (default, чистая пунктуация, может терять
 #               сегменты с длинными паузами, см. research/transcribe_compare)
-#   "gigaam"  — Sber GigaAM v2_rnnt (полнее по покрытию, **без пунктуации**,
-#               подходит как fallback / альтернатива)
+#   "gigaam"  — Sber GigaAM v3_e2e_rnnt (полнее по покрытию; e2e-модели сами
+#               ставят пунктуацию и пишут числа цифрами, v3_rnnt/v3_ctc — без неё)
 TRANSCRIPTION_ENGINE = os.getenv("TRANSCRIPTION_ENGINE", "gigaam")
-GIGAAM_MODEL = os.getenv("GIGAAM_MODEL", "v2_rnnt")  # v2_rnnt | v2_ctc
+GIGAAM_MODEL = os.getenv("GIGAAM_MODEL", "v3_e2e_rnnt")  # v3_e2e_rnnt | v3_rnnt | v3_e2e_ctc | v3_ctc
 
 # Claude CLI — таймауты
 # Длинные встречи анализируются десятки минут: 5 мин (прежнее значение)

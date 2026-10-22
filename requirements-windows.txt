@@ -9,13 +9,15 @@ PyAudioWPatch>=0.2.12
 
 # Транскрипция (GPU через CUDA)
 faster-whisper>=1.0.0
+# GigaAM v3 есть только в git (на PyPI лежит 0.1.0 без v3)
+gigaam @ git+https://github.com/salute-developers/GigaAM.git@7447938d791c4f3e643386ee22c33777004293a5
 
 # PyTorch с CUDA — устанавливать отдельно по инструкции:
 # https://pytorch.org/get-started/locally/
 # pip install torch --index-url https://download.pytorch.org/whl/cu121
 
 # Диаризация
-pyannote.audio==3.3.2
+pyannote.audio==4.0.4
 
 # LLM
 anthropic>=0.25.0
