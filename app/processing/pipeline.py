@@ -96,12 +96,18 @@ def _assign_speakers(
 
 # ── Детекция имён спикеров ────────────────────────────────────────────────────
 
+# Регистр важен: имя опознаётся по заглавной букве, поэтому IGNORECASE — только
+# на ключевых словах. С флагом на весь паттерн «я не …» давало спикера «Не».
+# Без пунктуации (gigaam v3_rnnt/ctc) срабатывает только «меня зовут».
+_NAME = r"([А-ЯЁA-Z][а-яёa-z]+)"
+_CLAUSE_START = r"(?:^|(?<=[.,!?])\s*)"      # «Привет, это Денис.», но не «команды это Джаггер»
+_NAME_END = r"(?=\s*(?:[,.!?]|$))"           # «я Денис.», но не «я Антону написал»
+
 _NAME_PATTERNS = [
-    r"меня зовут\s+([А-ЯЁа-яёA-Za-z][а-яёa-z]+)",
-    r"я\s+([А-ЯЁA-Z][а-яёa-z]+)[,\s]",
-    r"это\s+([А-ЯЁA-Z][а-яёa-z]+)[,\s]",
-    r"говорит\s+([А-ЯЁA-Z][а-яёa-z]+)[,\s]",
-    r"([А-ЯЁA-Z][а-яёa-z]+)\s+здесь",
+    r"(?i:меня зовут)\s+([А-ЯЁа-яёA-Za-z][а-яёa-z]+)",
+    _CLAUSE_START + r"(?i:я)\s+" + _NAME + _NAME_END,
+    _CLAUSE_START + r"(?i:это)\s+" + _NAME + _NAME_END,
+    r"(?i:говорит)\s+" + _NAME + _NAME_END,
 ]
 
 
@@ -119,7 +125,7 @@ def _detect_names(aligned: list[dict]) -> dict[str, str]:
             continue
         text = seg.get("text", "")
         for pattern in _NAME_PATTERNS:
-            m = re.search(pattern, text, re.IGNORECASE)
+            m = re.search(pattern, text)
             if m:
                 found[speaker] = m.group(1).capitalize()
                 break
