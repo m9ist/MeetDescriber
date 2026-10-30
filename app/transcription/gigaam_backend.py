@@ -42,6 +42,8 @@ class GigaAMBackend(TranscriptionBackend):
         control: Optional[ProcessControl] = None,
     ) -> TranscriptionResult:
         control = control or ProcessControl()
+        # Пауза/стоп, нажатые до старта, — не поднимаем worker зря.
+        control.check_cancel()
         proc = subprocess.Popen(
             [sys.executable, "-u", str(_WORKER), str(audio_path)],
             stdout=subprocess.PIPE,

@@ -5,6 +5,7 @@ Worker'ы — отдельные subprocess'ы, изнутри не прерыв
 процесс целиком (NtSuspendProcess на Windows, SIGSTOP на POSIX): CPU/GPU он больше
 не грузит, но VRAM и RAM остаются занятыми до продолжения или остановки.
 Остановка убивает процесс: terminate → kill по таймауту.
+Между worker'ами пауза держит сам поток пайплайна в check_cancel().
 
 Один ProcessControl на запуск пайплайна: backend регистрирует в нём свой Popen
 через `with control.attached(proc)`, UI зовёт pause/resume/stop из главного потока.
@@ -46,13 +47,21 @@ def _resume(proc: subprocess.Popen) -> None:
 
 def _nt_call(fn_name: str, pid: int) -> None:
     import ctypes
+    from ctypes import wintypes
     PROCESS_SUSPEND_RESUME = 0x0800
-    kernel32 = ctypes.windll.kernel32
+    # Явные сигнатуры: по умолчанию ctypes режет HANDLE до c_int.
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    nt_fn = getattr(ctypes.WinDLL("ntdll"), fn_name)
+    nt_fn.argtypes = [wintypes.HANDLE]
+    nt_fn.restype = ctypes.c_long
     h = kernel32.OpenProcess(PROCESS_SUSPEND_RESUME, False, pid)
     if not h:
-        raise OSError(f"OpenProcess({pid}) failed: {ctypes.GetLastError()}")
+        raise OSError(f"OpenProcess({pid}) failed: {ctypes.get_last_error()}")
     try:
-        status = getattr(ctypes.windll.ntdll, fn_name)(h)
+        status = nt_fn(h)
         if status != 0:
             raise OSError(f"{fn_name}({pid}) NTSTATUS=0x{status & 0xFFFFFFFF:08X}")
     finally:
@@ -63,7 +72,8 @@ class ProcessControl:
     """Потокобезопасно: pause/resume/stop из UI, attach/detach из потока пайплайна."""
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        # Condition: check_cancel() ждёт на нём, пока стоит пауза.
+        self._cond = threading.Condition()
         self._proc: Optional[subprocess.Popen] = None
         self._paused = False
         self._cancel = threading.Event()
@@ -77,6 +87,11 @@ class ProcessControl:
         return self._cancel.is_set()
 
     def check_cancel(self) -> None:
+        """Из потока пайплайна на границах этапов: ждёт, пока стоит пауза,
+        и бросает PipelineCancelledError, если нажали «Остановить»."""
+        with self._cond:
+            while self._paused and not self._cancel.is_set():
+                self._cond.wait()
         if self._cancel.is_set():
             raise PipelineCancelledError()
 
@@ -86,7 +101,7 @@ class ProcessControl:
     def attached(self, proc: subprocess.Popen) -> Iterator[None]:
         """Регистрирует запущенный worker на время блока. Применяет паузу/стоп,
         если их нажали между этапами, пока worker'а не было."""
-        with self._lock:
+        with self._cond:
             self._proc = proc
             if self._cancel.is_set():
                 self._kill_locked()
@@ -95,24 +110,26 @@ class ProcessControl:
         try:
             yield
         finally:
-            with self._lock:
+            with self._cond:
                 self._proc = None
 
     # ── Из UI ─────────────────────────────────────────────────────────────────
 
     def pause(self) -> None:
-        with self._lock:
+        with self._cond:
             if self._paused or self._cancel.is_set():
                 return
             self._paused = True
             if self._proc is not None:
                 self._suspend_locked()
+            self._cond.notify_all()
 
     def resume(self) -> None:
-        with self._lock:
+        with self._cond:
             if not self._paused:
                 return
             self._paused = False
+            self._cond.notify_all()
             if self._proc is not None and self._proc.poll() is None:
                 try:
                     _resume(self._proc)
@@ -121,14 +138,15 @@ class ProcessControl:
                     log.error("не удалось продолжить worker pid=%d", self._proc.pid, exc_info=True)
 
     def stop(self) -> None:
-        """Ставит флаг отмены и убивает текущий worker. Не блокирует дольше
-        STOP_KILL_TIMEOUT_SEC; вызывать можно из главного потока."""
-        with self._lock:
+        """Ставит флаг отмены и убивает текущий worker. Не блокирует: kill по
+        таймауту — в отдельном потоке; вызывать можно из главного потока."""
+        with self._cond:
             self._cancel.set()
             if self._proc is not None:
                 self._kill_locked()
+            self._cond.notify_all()
 
-    # ── Внутреннее (под self._lock) ───────────────────────────────────────────
+    # ── Внутреннее (под self._cond) ───────────────────────────────────────────
 
     def _suspend_locked(self) -> None:
         proc = self._proc
@@ -153,9 +171,14 @@ class ProcessControl:
                 log.warning("resume перед остановкой не удался pid=%d", proc.pid, exc_info=True)
             self._paused = False
         proc.terminate()
-        try:
-            proc.wait(timeout=STOP_KILL_TIMEOUT_SEC)
-        except subprocess.TimeoutExpired:
-            log.warning("worker pid=%d не завершился за %.0f с — kill", proc.pid, STOP_KILL_TIMEOUT_SEC)
-            proc.kill()
         log.info("worker pid=%d stopped by user", proc.pid)
+        threading.Thread(target=_kill_if_alive, args=(proc,), daemon=True,
+                         name=f"worker-kill-{proc.pid}").start()
+
+
+def _kill_if_alive(proc: subprocess.Popen) -> None:
+    try:
+        proc.wait(timeout=STOP_KILL_TIMEOUT_SEC)
+    except subprocess.TimeoutExpired:
+        log.warning("worker pid=%d не завершился за %.0f с — kill", proc.pid, STOP_KILL_TIMEOUT_SEC)
+        proc.kill()

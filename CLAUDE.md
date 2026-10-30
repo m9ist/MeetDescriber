@@ -114,9 +114,10 @@ VRAM освобождается автоматически при exit worker'а
 
 ### Пауза / остановка worker'ов
 `app/processing/worker_control.ProcessControl` — один на запуск пайплайна; backend'ы регистрируют свой Popen через `with control.attached(proc)`. Кнопки статус-окна:
-- «Пауза» — `NtSuspendProcess` (Win) / `SIGSTOP` (Mac): CPU/GPU свободны, **VRAM и RAM остаются заняты** до продолжения или остановки. Нажатая между этапами — применится к следующему worker'у при старте
+- «Пауза» — `NtSuspendProcess` (Win) / `SIGSTOP` (Mac): CPU/GPU свободны, **VRAM и RAM остаются заняты** до продолжения или остановки. Между этапами поток пайплайна ждёт в `check_cancel()`, следующий worker не стартует
+- На выходе из приложения `_on_quit` останавливает worker'ы всех идущих пайплайнов: замороженный иначе пережил бы приложение
 - «Остановить» — terminate → kill через 5 с, `PipelineCancelledError`; job откатывается в `pending`/`transcribed`/`analyzed` по готовым документам. Продолжение — обычное «Обработать»: кэш `diarization.json` подхватится, прерванная транскрипция пойдёт с начала
-- mlx-whisper (Mac) работает in-process — паузы нет, остановка срабатывает на границе этапа
+- mlx-whisper (Mac) работает in-process — пауза и остановка срабатывают только на границе этапа, до неё транскрипция продолжает идти
 
 ### Транскрипция: переключатель движка
 - `config.TRANSCRIPTION_ENGINE = "gigaam"` (default) | `"whisper"`

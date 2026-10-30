@@ -189,6 +189,9 @@ class App:
         self._stop_thread: Optional[threading.Thread] = None
         self._pending_start: Optional[dict] = None
         self._quitting: bool = False  # после _on_quit новые записи не стартуют
+        # ProcessControl идущих пайплайнов: на выходе их worker'ы надо убить —
+        # замороженный паузой worker иначе переживёт приложение и будет держать VRAM.
+        self._pipeline_controls: set = set()
         # На Mac: PyObjC callbacks не могут безопасно вызывать tkinter напрямую.
         # Все tkinter-операции передаём через эту очередь и выполняем в main loop.
         self._mac_queue: queue.SimpleQueue = queue.SimpleQueue()
@@ -718,6 +721,7 @@ class App:
         title = row["title"] if row else "Встреча"
 
         control = ProcessControl()
+        self._pipeline_controls.add(control)
         modal = ProcessingStatusWindow(self._root, title, schedule_fn=self._schedule,
                                        control=control)
         modal.show()
@@ -734,6 +738,7 @@ class App:
                 log.error("job %d error: %s", job_id, e, exc_info=True)
                 modal.update("error", str(e)[:60])
             finally:
+                self._pipeline_controls.discard(control)
                 modal.close()
                 self._schedule(self._refresh_tray_jobs)
 
@@ -907,6 +912,9 @@ class App:
         # проверки ниже, и её потоки умрут на выходе посреди read()/terminate().
         self._quitting = True
         self._pending_start = None
+        for control in list(self._pipeline_controls):
+            log.info("quit: stopping pipeline worker")
+            control.stop()
         stop_thread = self._stop_thread
         if stop_thread is not None:
             # Фоновая остановка ещё разрушает стримы: daemon-поток, убитый на выходе

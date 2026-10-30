@@ -43,6 +43,8 @@ class FasterWhisperBackend(TranscriptionBackend):
         control: Optional[ProcessControl] = None,
     ) -> TranscriptionResult:
         control = control or ProcessControl()
+        # Пауза/стоп, нажатые до старта, — не поднимаем worker зря.
+        control.check_cancel()
         # -u (unbuffered Python I/O) обязательно: иначе stderr child-процесса
         # буферизуется при пайпинге, PROGRESS-строки накапливаются и status-окно
         # не показывает прогресс в реальном времени.

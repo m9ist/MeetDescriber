@@ -43,6 +43,8 @@ class PyannoteDiarizer:
         self, audio_path: Path, control: Optional[ProcessControl] = None,
     ) -> list[DiarizationSegment]:
         control = control or ProcessControl()
+        # Пауза/стоп, нажатые до старта, — не поднимаем worker зря.
+        control.check_cancel()
         # -u + PYTHONUNBUFFERED=1: stderr child-процесса в pipe иначе
         # буферизуется и логи приходят пачкой только при завершении worker'а.
         proc = subprocess.Popen(

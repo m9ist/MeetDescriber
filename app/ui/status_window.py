@@ -57,6 +57,7 @@ class ProcessingStatusWindow:
         self._control = control
         self._stage = ""
         self._pause_btn: Optional[tk.Button] = None
+        self._stop_btn: Optional[tk.Button] = None
         self._win: Optional[tk.Toplevel] = None
         self._stage_var: Optional[tk.StringVar] = None
         self._detail_var: Optional[tk.StringVar] = None
@@ -173,7 +174,7 @@ class ProcessingStatusWindow:
                 padx=8, pady=2,
             )
             self._pause_btn.pack(side="left", padx=(0, 6))
-            tk.Button(
+            self._stop_btn = tk.Button(
                 buttons,
                 text="Остановить",
                 command=self._on_cancel,
@@ -182,7 +183,8 @@ class ProcessingStatusWindow:
                 bg="#3a2a2e", fg="#cc7777",
                 activebackground="#4a2a2e", activeforeground="#ff9999",
                 padx=8, pady=2,
-            ).pack(side="left")
+            )
+            self._stop_btn.pack(side="left")
 
         self._win = win
         self._spinning = True
@@ -284,8 +286,12 @@ class ProcessingStatusWindow:
     def _on_cancel(self) -> None:
         log_action("status_window_stop", meeting_title=self._meeting_title, stage=self._stage)
         self._update("cancelling", "")
-        if self._pause_btn:
-            self._pause_btn.configure(state="disabled")
+        for btn in (self._pause_btn, self._stop_btn):
+            if btn:
+                btn.configure(state="disabled")
+        # Пауза могла остановить анимацию — «Остановка...» не должна выглядеть зависшей.
+        if self._progressbar and self._progressbar["mode"] == "indeterminate":
+            self._progressbar.start(50)
         if self._control:
             # Убивает текущий worker (terminate → kill по таймауту); пайплайн
             # получает PipelineCancelledError и закрывает окно сам.
