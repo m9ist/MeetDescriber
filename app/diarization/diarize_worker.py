@@ -51,6 +51,9 @@ def _load_wav_as_tensor(path: Path):
     return tensor.unsqueeze(0), frame_rate   # (1, samples), rate
 
 
+EMBEDDING_BATCH_SIZE = 4
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         log.error("Usage: diarize_worker.py <wav_path>")
@@ -77,6 +80,12 @@ def main() -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     pipeline.to(torch.device(device))
+    # При батче эмбеддингов >= 8 cuDNN (9.10, torch 2.8) выбирает алгоритм свёртки
+    # с рабочей памятью ~8.7 ГБ: с остальными приложениями это упирается в 12 ГБ
+    # RTX 3060, драйвер сбрасывает VRAM в системную RAM, GPU висит на 100% при
+    # ~60 Вт, и диаризация 20 мин аудио тянется полчаса. При батче 4 пик 0.4 ГБ,
+    # и это ещё и быстрее (53 мин аудио: 92 с против 187 с). Замеры 2026-10-30.
+    pipeline.embedding_batch_size = EMBEDDING_BATCH_SIZE
     log.info("pyannote loaded on %s", device)
 
     waveform, rate = _load_wav_as_tensor(wav_path)
@@ -93,6 +102,8 @@ def main() -> None:
     ]
     segments.sort(key=lambda s: s["start"])
     log.info("done: %d segments", len(segments))
+    if torch.cuda.is_available():
+        log.info("VRAM peak %.2f GB", torch.cuda.max_memory_allocated() / 1024**3)
 
     print(json.dumps(segments))
 
