@@ -112,7 +112,7 @@ ctranslate2 (faster-whisper) и PyTorch (pyannote/gigaam) бандлят **ра�
 
 VRAM освобождается автоматически при exit worker'а — `unload_model()` теперь no-op.
 
-**Диаризация: `embedding_batch_size = 4`** (`diarize_worker.EMBEDDING_BATCH_SIZE`). При батче ≥ 8 cuDNN берёт под свёртку ~8.7 ГБ рабочей памяти → на 12 ГБ карте VRAM переливается в системную RAM, GPU 100% при ~60 Вт, диаризация в десятки раз медленнее. Не поднимать без замера пика: worker пишет `VRAM peak` в лог.
+**Диаризация: `embedding_batch_size = 4` + лимит VRAM 0.4** (`diarize_worker.EMBEDDING_BATCH_SIZE` / `VRAM_FRACTION`). При батче 8 и 32 cuDNN берёт под свёртку ~8.7 ГБ рабочей памяти — на 12 ГБ карте запаса нет, и когда VRAM занята чем-то ещё, она переливается в системную RAM: GPU 100% при ~60 Вт, диаризация в десятки раз медленнее (29.10; в другие дни батч 32 проходил). Лимит доли VRAM заставляет cuDNN отбросить прожорливый план независимо от батча. Worker пишет `VRAM peak` в лог.
 
 ### Пауза / остановка worker'ов
 `app/processing/worker_control.ProcessControl` — один на запуск пайплайна; backend'ы регистрируют свой Popen через `with control.attached(proc)`. Кнопки статус-окна:

@@ -52,6 +52,7 @@ def _load_wav_as_tensor(path: Path):
 
 
 EMBEDDING_BATCH_SIZE = 4
+VRAM_FRACTION = 0.4
 
 
 def main() -> None:
@@ -80,12 +81,16 @@ def main() -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     pipeline.to(torch.device(device))
-    # При батче эмбеддингов >= 8 cuDNN (9.10, torch 2.8) выбирает алгоритм свёртки
-    # с рабочей памятью ~8.7 ГБ: с остальными приложениями это упирается в 12 ГБ
-    # RTX 3060, драйвер сбрасывает VRAM в системную RAM, GPU висит на 100% при
-    # ~60 Вт, и диаризация 20 мин аудио тянется полчаса. При батче 4 пик 0.4 ГБ,
-    # и это ещё и быстрее (53 мин аудио: 92 с против 187 с). Замеры 2026-10-30.
+    # При батче эмбеддингов 8 и 32 (дефолт) cuDNN 9.10 / torch 2.8 выбирает алгоритм
+    # свёртки с рабочей памятью ~8.7 ГБ. Запаса на 12 ГБ RTX 3060 это не оставляет:
+    # когда VRAM занята чем-то ещё, драйвер сбрасывает её в системную RAM, GPU висит
+    # на 100% при ~60 Вт, и диаризация 20–40 мин аудио тянется полчаса (29.10).
+    # Батч 4 даёт пик 0.43 ГБ при той же скорости. Лимит доли VRAM — страховка от
+    # смены эвристики cuDNN: план, которому не хватает памяти, cuDNN отбрасывает и
+    # берёт следующий (замерено: батч 32 под лимитом — пик 1.6 ГБ, та же скорость).
     pipeline.embedding_batch_size = EMBEDDING_BATCH_SIZE
+    if device == "cuda":
+        torch.cuda.set_per_process_memory_fraction(VRAM_FRACTION)
     log.info("pyannote loaded on %s", device)
 
     waveform, rate = _load_wav_as_tensor(wav_path)
@@ -103,7 +108,8 @@ def main() -> None:
     segments.sort(key=lambda s: s["start"])
     log.info("done: %d segments", len(segments))
     if torch.cuda.is_available():
-        log.info("VRAM peak %.2f GB", torch.cuda.max_memory_allocated() / 1024**3)
+        log.info("VRAM peak allocated %.2f GB, reserved %.2f GB",
+                 torch.cuda.max_memory_allocated() / 1e9, torch.cuda.max_memory_reserved() / 1e9)
 
     print(json.dumps(segments))
 
