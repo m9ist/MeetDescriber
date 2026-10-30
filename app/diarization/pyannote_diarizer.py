@@ -16,6 +16,9 @@ import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
+
+from app.processing.worker_control import ProcessControl
 
 log = logging.getLogger("app")
 
@@ -36,7 +39,10 @@ def unload() -> None:
 
 class PyannoteDiarizer:
 
-    def diarize(self, audio_path: Path) -> list[DiarizationSegment]:
+    def diarize(
+        self, audio_path: Path, control: Optional[ProcessControl] = None,
+    ) -> list[DiarizationSegment]:
+        control = control or ProcessControl()
         # -u + PYTHONUNBUFFERED=1: stderr child-процесса в pipe иначе
         # буферизуется и логи приходят пачкой только при завершении worker'а.
         proc = subprocess.Popen(
@@ -60,9 +66,11 @@ class PyannoteDiarizer:
 
         # НЕ через communicate() — она запускает свой stderr-reader и гонится
         # с нашим _pipe_stderr. Читаем stdout вручную.
-        stdout = proc.stdout.read()
-        proc.wait()
-        t.join()
+        with control.attached(proc):
+            stdout = proc.stdout.read()
+            proc.wait()
+            t.join()
+        control.check_cancel()
 
         if proc.returncode != 0:
             raise RuntimeError(

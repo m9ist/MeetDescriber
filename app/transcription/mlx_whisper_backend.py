@@ -54,7 +54,9 @@ class _LogWriter(io.TextIOBase):
 
 class MLXWhisperBackend(TranscriptionBackend):
 
-    def transcribe(self, audio_path: Path, on_progress=None) -> TranscriptionResult:
+    def transcribe(self, audio_path: Path, on_progress=None, control=None) -> TranscriptionResult:
+        # mlx-whisper работает в этом же процессе — паузить и убивать нечего,
+        # остановка срабатывает на границе этапов пайплайна.
         import mlx_whisper
 
         log.info("mlx-whisper: загружаем модель и аудио %s...", audio_path.name)

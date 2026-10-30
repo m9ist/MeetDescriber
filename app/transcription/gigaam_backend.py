@@ -15,6 +15,7 @@ import threading
 from pathlib import Path
 from typing import Callable, Optional
 
+from app.processing.worker_control import ProcessControl
 from app.transcription.backend import (
     TranscriptionBackend,
     TranscriptionResult,
@@ -38,7 +39,9 @@ class GigaAMBackend(TranscriptionBackend):
         self,
         audio_path: Path,
         on_progress: Optional[Callable[[float, float], None]] = None,
+        control: Optional[ProcessControl] = None,
     ) -> TranscriptionResult:
+        control = control or ProcessControl()
         proc = subprocess.Popen(
             [sys.executable, "-u", str(_WORKER), str(audio_path)],
             stdout=subprocess.PIPE,
@@ -65,9 +68,11 @@ class GigaAMBackend(TranscriptionBackend):
         t = threading.Thread(target=_pipe_stderr, daemon=True)
         t.start()
 
-        stdout = proc.stdout.read()
-        proc.wait()
-        t.join()
+        with control.attached(proc):
+            stdout = proc.stdout.read()
+            proc.wait()
+            t.join()
+        control.check_cancel()
 
         if proc.returncode != 0:
             raise RuntimeError(

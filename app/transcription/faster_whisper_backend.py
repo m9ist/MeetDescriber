@@ -16,6 +16,7 @@ import threading
 from pathlib import Path
 from typing import Callable, Optional
 
+from app.processing.worker_control import ProcessControl
 from app.transcription.backend import (
     TranscriptionBackend,
     TranscriptionResult,
@@ -39,7 +40,9 @@ class FasterWhisperBackend(TranscriptionBackend):
         self,
         audio_path: Path,
         on_progress: Optional[Callable[[float, float], None]] = None,
+        control: Optional[ProcessControl] = None,
     ) -> TranscriptionResult:
+        control = control or ProcessControl()
         # -u (unbuffered Python I/O) обязательно: иначе stderr child-процесса
         # буферизуется при пайпинге, PROGRESS-строки накапливаются и status-окно
         # не показывает прогресс в реальном времени.
@@ -73,9 +76,11 @@ class FasterWhisperBackend(TranscriptionBackend):
         # ВАЖНО: НЕ вызываем proc.communicate() — она внутри стартует ещё один
         # reader-тред для stderr и гонится с нашим _pipe_stderr (Windows pipe
         # читается дважды → строки PROGRESS теряются). Читаем stdout вручную.
-        stdout = proc.stdout.read()
-        proc.wait()
-        t.join()
+        with control.attached(proc):
+            stdout = proc.stdout.read()
+            proc.wait()
+            t.join()
+        control.check_cancel()
 
         if proc.returncode != 0:
             raise RuntimeError(

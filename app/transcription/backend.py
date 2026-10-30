@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import config
+from app.processing.worker_control import ProcessControl
 
 
 @dataclass
@@ -41,10 +42,13 @@ class TranscriptionBackend(ABC):
         self,
         audio_path: Path,
         on_progress: "Optional[Callable[[float, float], None]]" = None,
+        control: "Optional[ProcessControl]" = None,
     ) -> TranscriptionResult:
         """Транскрибирует аудиофайл. Возвращает сегменты с временными метками.
 
         on_progress(current_sec, total_sec) — вызывается после каждого сегмента.
+        control — пауза/остановка worker-процесса; бросает PipelineCancelledError
+        при остановке.
         """
         ...
 

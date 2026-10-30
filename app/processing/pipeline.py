@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -30,10 +29,7 @@ from app.storage.db import get_conn
 from app.storage import file_manager
 from app.transcription.backend import get_backend, TranscriptionResult
 from app.diarization.pyannote_diarizer import PyannoteDiarizer, DiarizationSegment
-
-
-class PipelineCancelledError(Exception):
-    pass
+from app.processing.worker_control import PipelineCancelledError, ProcessControl
 
 
 # ── Приоритет потока ──────────────────────────────────────────────────────────
@@ -208,11 +204,42 @@ def run_transcription(
     job_id: int,
     on_progress: Optional[Callable[[str, str], None]] = None,
     ask_claude: Optional[Callable] = None,
-    cancel_event: Optional[threading.Event] = None,
+    control: Optional[ProcessControl] = None,
 ) -> Optional[Path]:
     """
     Запускает полный пайплайн Этапа 4 для задания job_id.
 
+    control — пауза/остановка из UI. При остановке job возвращается в статус,
+    с которого обработку можно продолжить (повторный запуск подхватит готовые
+    документы и кэш диаризации), и бросается PipelineCancelledError.
+    """
+    try:
+        return _run_transcription(job_id, on_progress, ask_claude, control)
+    except PipelineCancelledError:
+        _reset_cancelled_job(job_id)
+        raise
+
+
+def _reset_cancelled_job(job_id: int) -> None:
+    with get_conn() as conn:
+        job = dict(conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone())
+    if job.get("analysis_path") and Path(job["analysis_path"]).exists():
+        status = "analyzed"
+    elif job.get("transcription_path") and Path(job["transcription_path"]).exists():
+        status = "transcribed"
+    else:
+        status = "pending"
+    _set_job_status(job_id, status)
+    log.info("pipeline stopped by user  job=%d → %s", job_id, status)
+
+
+def _run_transcription(
+    job_id: int,
+    on_progress: Optional[Callable[[str, str], None]] = None,
+    ask_claude: Optional[Callable] = None,
+    control: Optional[ProcessControl] = None,
+) -> Optional[Path]:
+    """
     Returns:
         Path к transcription.md или None при ошибке.
     """
@@ -243,9 +270,8 @@ def run_transcription(
         if on_progress:
             on_progress(stage, detail)
 
-    def _check_cancel() -> None:
-        if cancel_event and cancel_event.is_set():
-            raise PipelineCancelledError()
+    control = control or ProcessControl()
+    _check_cancel = control.check_cancel
 
     diar_cache_path = session_dir / "diarization.json"
 
@@ -281,7 +307,7 @@ def run_transcription(
             _prev_priority = _set_thread_priority_below_normal()
             try:
                 diarizer = PyannoteDiarizer()
-                diarization = diarizer.diarize(merged)
+                diarization = diarizer.diarize(merged, control=control)
             finally:
                 _restore_thread_priority(_prev_priority)
             _save_diarization_cache(diar_cache_path, diarization)
@@ -304,7 +330,8 @@ def run_transcription(
 
         _prev_priority = _set_thread_priority_below_normal()
         try:
-            transcription = backend.transcribe(merged, on_progress=_on_transcribe_progress)
+            transcription = backend.transcribe(merged, on_progress=_on_transcribe_progress,
+                                               control=control)
         finally:
             _restore_thread_priority(_prev_priority)
         _transcribe_sec = time.monotonic() - t0

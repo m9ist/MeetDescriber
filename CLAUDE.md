@@ -112,6 +112,12 @@ ctranslate2 (faster-whisper) и PyTorch (pyannote/gigaam) бандлят **ра�
 
 VRAM освобождается автоматически при exit worker'а — `unload_model()` теперь no-op.
 
+### Пауза / остановка worker'ов
+`app/processing/worker_control.ProcessControl` — один на запуск пайплайна; backend'ы регистрируют свой Popen через `with control.attached(proc)`. Кнопки статус-окна:
+- «Пауза» — `NtSuspendProcess` (Win) / `SIGSTOP` (Mac): CPU/GPU свободны, **VRAM и RAM остаются заняты** до продолжения или остановки. Нажатая между этапами — применится к следующему worker'у при старте
+- «Остановить» — terminate → kill через 5 с, `PipelineCancelledError`; job откатывается в `pending`/`transcribed`/`analyzed` по готовым документам. Продолжение — обычное «Обработать»: кэш `diarization.json` подхватится, прерванная транскрипция пойдёт с начала
+- mlx-whisper (Mac) работает in-process — паузы нет, остановка срабатывает на границе этапа
+
 ### Транскрипция: переключатель движка
 - `config.TRANSCRIPTION_ENGINE = "gigaam"` (default) | `"whisper"`
 - `app/transcription/backend.py:get_backend(engine=None)` — factory

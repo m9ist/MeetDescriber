@@ -3,15 +3,16 @@
 
 Показывается при запуске пайплайна, обновляется по мере прохождения этапов,
 закрывается автоматически после завершения. Нельзя закрыть вручную.
+Кнопки «Пауза»/«Продолжить» замораживают worker-процесс, «Остановить» убивает его.
 """
 from __future__ import annotations
 
-import threading
 import tkinter as tk
 import tkinter.ttk as ttk
 from typing import Optional
 
 import config
+from app.processing.worker_control import ProcessControl
 from app.ui.user_actions import log_action
 
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -24,7 +25,7 @@ _STAGE_LABELS: dict[str, str] = {
     "followup":     "Follow-up (LLM)...",
     "done":         "Готово ✓",
     "error":        "Ошибка",
-    "cancelling":   "Остановка после текущего этапа...",
+    "cancelling":   "Остановка...",
 }
 
 
@@ -41,7 +42,7 @@ class ProcessingStatusWindow:
     """
 
     def __init__(self, root: tk.Tk, title: str, schedule_fn=None,
-                 cancel_event: Optional[threading.Event] = None) -> None:
+                 control: Optional[ProcessControl] = None) -> None:
         self._root = root
         self._meeting_title = title
         # На Mac root.after() из фонового потока падает с "main thread is not in main loop".
@@ -53,7 +54,9 @@ class ProcessingStatusWindow:
             def _default_schedule(fn, delay_ms: int = 0):
                 root.after(delay_ms, fn)
             self._schedule = _default_schedule
-        self._cancel_event = cancel_event
+        self._control = control
+        self._stage = ""
+        self._pause_btn: Optional[tk.Button] = None
         self._win: Optional[tk.Toplevel] = None
         self._stage_var: Optional[tk.StringVar] = None
         self._detail_var: Optional[tk.StringVar] = None
@@ -89,7 +92,7 @@ class ProcessingStatusWindow:
         if not config.IS_MAC:
             win.protocol("WM_DELETE_WINDOW", lambda: None)
 
-        w, h = 380, 130
+        w, h = 380, 140
         sw = win.winfo_screenwidth()
         sh = win.winfo_screenheight()
         win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
@@ -156,17 +159,30 @@ class ProcessingStatusWindow:
         self._progressbar.pack(fill="x", pady=(6, 0))
         self._progressbar.start(50)  # indeterminate по умолчанию
 
-        if self._cancel_event is not None:
+        if self._control is not None:
+            buttons = tk.Frame(frame, bg="#1a1a2e")
+            buttons.pack(anchor="e", pady=(6, 0))
+            self._pause_btn = tk.Button(
+                buttons,
+                text="Пауза",
+                command=self._on_pause_toggle,
+                font=(config.UI_FONT, 9),
+                relief="flat",
+                bg="#2a2a4e", fg="#aaaacc",
+                activebackground="#3a3a5e", activeforeground="#ffffff",
+                padx=8, pady=2,
+            )
+            self._pause_btn.pack(side="left", padx=(0, 6))
             tk.Button(
-                frame,
-                text="Отмена",
+                buttons,
+                text="Остановить",
                 command=self._on_cancel,
                 font=(config.UI_FONT, 9),
                 relief="flat",
                 bg="#3a2a2e", fg="#cc7777",
                 activebackground="#4a2a2e", activeforeground="#ff9999",
                 padx=8, pady=2,
-            ).pack(anchor="e", pady=(6, 0))
+            ).pack(side="left")
 
         self._win = win
         self._spinning = True
@@ -190,9 +206,12 @@ class ProcessingStatusWindow:
         else:
             self._win.deiconify()
 
-        label = _STAGE_LABELS.get(stage, stage)
-        self._stage_var.set(label)
-        self._spinning = stage not in ("done", "error")
+        # После «Остановить» умирающий пайплайн ещё может прислать прогресс —
+        # не даём ему перетереть «Остановка...».
+        if self._stage == "cancelling" and stage not in ("done", "error"):
+            return
+        self._stage = stage
+        self._update_stage_label()
 
         if stage == "transcribing" and "/" in detail:
             # detail = "1544/2292" — секунды
@@ -235,13 +254,42 @@ class ProcessingStatusWindow:
             self._spinner_idx += 1
         self._schedule(self._tick, 100)
 
+    def _on_pause_toggle(self) -> None:
+        if self._control is None or self._control.cancelled:
+            return
+        if self._control.paused:
+            log_action("status_window_resume", meeting_title=self._meeting_title, stage=self._stage)
+            self._control.resume()
+            self._pause_btn.configure(text="Пауза")
+        else:
+            log_action("status_window_pause", meeting_title=self._meeting_title, stage=self._stage)
+            self._control.pause()
+            self._pause_btn.configure(text="Продолжить")
+        self._update_stage_label()
+        if self._progressbar and self._progressbar["mode"] == "indeterminate":
+            if self._control.paused:
+                self._progressbar.stop()
+            else:
+                self._progressbar.start(50)
+
+    def _update_stage_label(self) -> None:
+        if not self._stage_var:
+            return
+        label = _STAGE_LABELS.get(self._stage, self._stage or "Запуск...")
+        paused = (self._control is not None and self._control.paused
+                  and self._stage not in ("done", "error", "cancelling"))
+        self._stage_var.set(f"⏸ Пауза · {label}" if paused else label)
+        self._spinning = not paused and self._stage not in ("done", "error")
+
     def _on_cancel(self) -> None:
-        log_action("status_window_cancel", meeting_title=self._meeting_title)
-        if self._cancel_event:
-            self._cancel_event.set()
-        # Не закрываем окно сразу — faster-whisper/pyannote не прерываются изнутри.
-        # Показываем статус и ждём, пока pipeline дойдёт до следующей точки проверки.
-        self._schedule(lambda: self._update("cancelling", ""))
+        log_action("status_window_stop", meeting_title=self._meeting_title, stage=self._stage)
+        self._update("cancelling", "")
+        if self._pause_btn:
+            self._pause_btn.configure(state="disabled")
+        if self._control:
+            # Убивает текущий worker (terminate → kill по таймауту); пайплайн
+            # получает PipelineCancelledError и закрывает окно сам.
+            self._control.stop()
 
     def _destroy(self) -> None:
         if self._win and self._win.winfo_exists():
